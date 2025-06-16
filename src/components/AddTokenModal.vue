@@ -207,17 +207,24 @@ function handleSearch() {
 }
 
 function selectToken(token: TokenResult) {
+  console.log('selectToken called with:', token)
   selectedToken.value = token
+  console.log('selectedToken set to:', selectedToken.value)
   tokensStore.clearSearch()
   searchQuery.value = ''
+  console.log('Search cleared, selectedToken after clear:', selectedToken.value)
 }
 
 async function addToken() {
-  if (!selectedToken.value) return
+  if (!selectedToken.value) {
+    console.log('No token selected')
+    return
+  }
 
   try {
     isAdding.value = true
     error.value = ''
+    console.log('Adding token:', selectedToken.value)
 
     // Add token to database
     const success = await tokensStore.addToken({
@@ -227,29 +234,36 @@ async function addToken() {
       iconUrl: selectedToken.value.iconUrl
     })
 
+    console.log('Add token result:', success)
+
     if (!success) {
       error.value = 'トークンの追加に失敗しました'
+      console.error('Token addition failed')
       return
     }
 
     // Add holding if quantity is specified
     const qty = parseFloat(quantity.value) || 0
+    console.log('Quantity:', qty)
     if (qty > 0) {
-      await holdingsStore.updateHolding(selectedToken.value.symbol, qty, note.value)
+      const holdingResult = await holdingsStore.updateHolding(selectedToken.value.symbol, qty, note.value)
+      console.log('Holding update result:', holdingResult)
     }
 
+    console.log('Emitting token-added event')
     emit('token-added')
   } catch (err) {
-    error.value = 'エラーが発生しました'
+    error.value = 'エラーが発生しました: ' + (err as Error).message
     console.error('Failed to add token:', err)
   } finally {
     isAdding.value = false
   }
 }
 
-// Clear search when modal opens
+// Clear search results when search query changes, but keep selected token
 watch(() => searchQuery.value, (newValue) => {
-  if (!newValue) {
+  if (!newValue && !selectedToken.value) {
+    // Only clear selectedToken if no token is currently selected
     selectedToken.value = null
   }
 })

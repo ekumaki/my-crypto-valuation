@@ -25,7 +25,7 @@ export interface CoinGeckoExchangeRate {
   }
 }
 
-const BASE_URL = 'https://api.coingecko.com/api/v3'
+const BASE_URL = import.meta.env.DEV ? '/api' : 'https://api.coingecko.com/api/v3'
 
 class CoinGeckoService {
   private async fetchAPI<T>(endpoint: string): Promise<T> {

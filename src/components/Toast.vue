@@ -203,7 +203,7 @@ window.showToast = {
 }
 
 // Export for use in composition API
-export function useToast() {
+const useToast = () => {
   return {
     success: (title: string, message?: string, duration?: number) => 
       addToast('success', title, message, duration),
@@ -216,6 +216,8 @@ export function useToast() {
     clear: clearAllToasts
   }
 }
+
+defineExpose({ useToast })
 
 // Make TypeScript happy
 declare global {
