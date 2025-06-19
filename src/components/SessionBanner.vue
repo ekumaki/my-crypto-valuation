@@ -14,6 +14,24 @@
         </div>
         
         <div class="flex items-center space-x-4">
+          <!-- Cloud Sync Status -->
+          <div v-if="syncStatus.isEnabled" class="flex items-center space-x-2">
+            <div 
+              :class="[
+                'w-2 h-2 rounded-full',
+                syncStatus.isSyncing ? 'bg-yellow-500 animate-pulse' : 
+                syncStatus.lastSyncError ? 'bg-red-500' : 'bg-green-500'
+              ]"
+            ></div>
+            <span class="text-sm text-gray-600 dark:text-gray-400">
+              {{
+                syncStatus.isSyncing ? '同期中' :
+                syncStatus.lastSyncError ? '同期エラー' : 
+                syncStatus.lastSyncTime ? `同期済み (${formatSyncTime(syncStatus.lastSyncTime)})` : '同期準備完了'
+              }}
+            </span>
+          </div>
+          
           <div class="text-sm text-gray-600 dark:text-gray-400">
             残り時間: {{ remainingDisplay }}
           </div>
@@ -55,6 +73,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useSessionStore } from '@/stores/session.store'
+import { syncService } from '@/services/sync.service'
 
 const emit = defineEmits<{
   openPasswordSettings: []
@@ -65,6 +84,7 @@ const showDropdown = ref(false)
 
 const remainingMinutes = computed(() => sessionStore.remainingMinutes)
 const remainingDisplay = computed(() => sessionStore.remainingDisplay)
+const syncStatus = computed(() => syncService.status.value)
 
 function logout() {
   showDropdown.value = false
@@ -74,5 +94,22 @@ function logout() {
 function openPasswordSettings() {
   showDropdown.value = false
   emit('openPasswordSettings')
+}
+
+function formatSyncTime(timestamp: number): string {
+  const date = new Date(timestamp)
+  const now = new Date()
+  const diffMs = now.getTime() - date.getTime()
+  const diffMinutes = Math.floor(diffMs / 60000)
+  
+  if (diffMinutes < 1) {
+    return 'たった今'
+  } else if (diffMinutes < 60) {
+    return `${diffMinutes}分前`
+  } else if (diffMinutes < 1440) {
+    return `${Math.floor(diffMinutes / 60)}時間前`
+  } else {
+    return date.toLocaleDateString('ja-JP')
+  }
 }
 </script>

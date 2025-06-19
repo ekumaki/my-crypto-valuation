@@ -61,6 +61,15 @@
             >
               保有数量入力
             </router-link>
+            <button
+              @click="showCloudSync = true"
+              class="border-b-2 py-4 px-1 text-sm font-medium transition-colors border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 flex items-center space-x-1"
+            >
+              <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M5.5 16a3.5 3.5 0 01-.369-6.98 4 4 0 117.753-1.977A4.5 4.5 0 1113.5 16h-8z" />
+              </svg>
+              <span>クラウド同期</span>
+            </button>
           </div>
         </div>
       </nav>
@@ -80,6 +89,30 @@
       @close="showPasswordSettings = false" 
       @success="handlePasswordChangeSuccess" 
     />
+    
+    <!-- Google Drive Sync Modal -->
+    <div v-if="showCloudSync" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+      <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+          <div class="flex items-center justify-between">
+            <h3 class="text-lg font-medium text-gray-900 dark:text-white">
+              Google Drive同期設定
+            </h3>
+            <button
+              @click="showCloudSync = false"
+              class="text-gray-400 hover:text-gray-500 dark:hover:text-gray-300"
+            >
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div class="p-6">
+          <GoogleDriveConnection />
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -91,12 +124,14 @@ import LoginForm from '@/components/LoginForm.vue'
 import SessionBanner from '@/components/SessionBanner.vue'
 import TimeoutWarning from '@/components/TimeoutWarning.vue'
 import PasswordSettings from '@/components/PasswordSettings.vue'
+import GoogleDriveConnection from '@/components/GoogleDriveConnection.vue'
 import { useSessionStore } from '@/stores/session.store'
 
 const router = useRouter()
 const sessionStore = useSessionStore()
 const isDark = ref(document.documentElement.classList.contains('dark'))
 const showPasswordSettings = ref(false)
+const showCloudSync = ref(false)
 
 function toggleDarkMode() {
   isDark.value = !isDark.value
