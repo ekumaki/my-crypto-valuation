@@ -8,10 +8,18 @@ export const useSessionStore = defineStore('session', () => {
   const showWarning = ref(false)
   const remainingTime = ref(0)
   const warningTimer = ref<number | null>(null)
+  const sessionStartTime = ref<number>(0)
   
   const isLocked = computed(() => !isAuthenticated.value)
   
   const remainingMinutes = computed(() => Math.ceil(remainingTime.value / 60000))
+  const remainingSeconds = computed(() => Math.ceil(remainingTime.value / 1000))
+  const remainingDisplay = computed(() => {
+    const totalSeconds = Math.ceil(remainingTime.value / 1000)
+    const minutes = Math.floor(totalSeconds / 60)
+    const seconds = totalSeconds % 60
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`
+  })
   
   async function initialize() {
     isLoading.value = true
@@ -35,12 +43,15 @@ export const useSessionStore = defineStore('session', () => {
   async function logout() {
     clearWarningTimer()
     removeActivityListeners()
+    document.removeEventListener('visibilitychange', handleVisibilityChange)
     showWarning.value = false
     isAuthenticated.value = false
+    sessionStartTime.value = 0
     await authService.logout()
   }
   
   function extendSession() {
+    // 明示的なセッション延長時のみ警告をクリアして時間をリセット
     authService.extendSession()
     showWarning.value = false
     startWarningCountdown()
@@ -48,10 +59,15 @@ export const useSessionStore = defineStore('session', () => {
   
   function startWarningCountdown() {
     clearWarningTimer()
-    remainingTime.value = 30 * 60 * 1000 // 30 minutes
+    const totalSessionTime = 30 * 60 * 1000 // 30 minutes
+    sessionStartTime.value = Date.now()
+    remainingTime.value = totalSessionTime
     
     const updateCountdown = () => {
-      remainingTime.value -= 1000
+      // 実際の経過時間から残り時間を計算
+      const elapsedTime = Date.now() - sessionStartTime.value
+      const newRemainingTime = Math.max(0, totalSessionTime - elapsedTime)
+      remainingTime.value = newRemainingTime
       
       if (remainingTime.value <= 5 * 60 * 1000 && !showWarning.value) {
         showWarning.value = true
@@ -59,6 +75,9 @@ export const useSessionStore = defineStore('session', () => {
       
       if (remainingTime.value > 0) {
         warningTimer.value = window.setTimeout(updateCountdown, 1000)
+      } else {
+        // 時間切れの場合は自動ログアウト
+        logout()
       }
     }
     
@@ -73,24 +92,23 @@ export const useSessionStore = defineStore('session', () => {
   }
   
   function handleActivity() {
-    if (isAuthenticated.value) {
+    if (isAuthenticated.value && !showWarning.value) {
+      // 警告が表示されていない場合のみタイマーをリセット
       authService.resetIdleTimer()
-      if (showWarning.value) {
-        showWarning.value = false
-        startWarningCountdown()
-      }
     }
   }
   
   function setupActivityListeners() {
-    const events = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart', 'click']
+    // マウス移動を除外し、明示的な操作のみを監視
+    const events = ['mousedown', 'keypress', 'scroll', 'touchstart', 'click']
     events.forEach(event => {
       document.addEventListener(event, handleActivity, { passive: true })
     })
   }
   
   function removeActivityListeners() {
-    const events = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart', 'click']
+    // setupActivityListenersと同じイベントリストを使用
+    const events = ['mousedown', 'keypress', 'scroll', 'touchstart', 'click']
     events.forEach(event => {
       document.removeEventListener(event, handleActivity)
     })
@@ -104,6 +122,29 @@ export const useSessionStore = defineStore('session', () => {
     logout()
   })
   
+  // Page Visibility API でタブの状態変化を監視
+  function handleVisibilityChange() {
+    if (document.visibilityState === 'visible' && isAuthenticated.value && sessionStartTime.value > 0) {
+      // タブがアクティブになった時に時間を再計算して即座に更新
+      const totalSessionTime = 30 * 60 * 1000
+      const elapsedTime = Date.now() - sessionStartTime.value
+      const newRemainingTime = Math.max(0, totalSessionTime - elapsedTime)
+      remainingTime.value = newRemainingTime
+      
+      // 警告状態も更新
+      if (remainingTime.value <= 5 * 60 * 1000 && !showWarning.value) {
+        showWarning.value = true
+      }
+      
+      // 時間切れの場合は即座にログアウト
+      if (remainingTime.value <= 0) {
+        logout()
+      }
+    }
+  }
+
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+
   window.addEventListener('beforeunload', () => {
     if (isAuthenticated.value) {
       authService.logout()
@@ -117,6 +158,8 @@ export const useSessionStore = defineStore('session', () => {
     showWarning,
     remainingTime,
     remainingMinutes,
+    remainingSeconds,
+    remainingDisplay,
     initialize,
     login,
     logout,

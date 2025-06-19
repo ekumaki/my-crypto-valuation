@@ -15,7 +15,7 @@
         
         <div class="flex items-center space-x-4">
           <div class="text-sm text-gray-600 dark:text-gray-400">
-            残り時間: {{ remainingMinutes }}分
+            残り時間: {{ remainingDisplay }}
           </div>
           
           <div class="relative">
@@ -64,6 +64,7 @@ const sessionStore = useSessionStore()
 const showDropdown = ref(false)
 
 const remainingMinutes = computed(() => sessionStore.remainingMinutes)
+const remainingDisplay = computed(() => sessionStore.remainingDisplay)
 
 function logout() {
   showDropdown.value = false
