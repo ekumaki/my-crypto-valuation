@@ -3,7 +3,7 @@ import { googleAuthService } from './google-auth.service'
 import { googleDriveApiService, type DriveFile } from './google-drive-api.service'
 import { cloudEncryptionService, type EncryptedData, type CloudBackupData } from './cloud-encryption.service'
 import { GOOGLE_DRIVE_CONFIG, SYNC_CONFIG, ERROR_MESSAGES } from '@/config/google-drive.config'
-import { db } from '@/services/db-v2'
+import { dbV2 } from '@/services/db-v2'
 
 export interface SyncStatus {
   isEnabled: boolean
@@ -62,7 +62,7 @@ class SyncService {
       }
 
       // Check if local data exists
-      const holdings = await db.holdings.toArray()
+      const holdings = await dbV2.holdings.toArray()
       this._status.value.localDataExists = holdings.length > 0
 
       // Check if cloud file exists (if authenticated)
@@ -223,14 +223,12 @@ class SyncService {
   }
 
   private async getLocalData(): Promise<any> {
-    const holdings = await db.holdings.toArray()
-    const locations = await db.locations.toArray()
-    const tokens = await db.tokens.toArray()
+    const holdings = await dbV2.holdings.toArray()
+    const locations = await dbV2.locations.toArray()
     
     return {
       holdings,
-      locations,
-      tokens
+      locations
     }
   }
 
@@ -304,14 +302,12 @@ class SyncService {
   }
 
   private async updateLocalData(data: any): Promise<void> {
-    await db.transaction('rw', [db.holdings, db.locations, db.tokens], async () => {
-      await db.holdings.clear()
-      await db.locations.clear()
-      await db.tokens.clear()
+    await dbV2.transaction('rw', [dbV2.holdings, dbV2.locations], async () => {
+      await dbV2.holdings.clear()
+      await dbV2.locations.clear()
       
-      if (data.holdings) await db.holdings.bulkAdd(data.holdings)
-      if (data.locations) await db.locations.bulkAdd(data.locations)
-      if (data.tokens) await db.tokens.bulkAdd(data.tokens)
+      if (data.holdings) await dbV2.holdings.bulkAdd(data.holdings)
+      if (data.locations) await dbV2.locations.bulkAdd(data.locations)
     })
     
     localStorage.setItem('lastDataModified', Date.now().toString())
@@ -334,8 +330,7 @@ class SyncService {
           // Simple merge strategy - could be more sophisticated
           finalData = {
             holdings: [...conflictData.localData.holdings, ...conflictData.cloudData.holdings],
-            locations: [...conflictData.localData.locations, ...conflictData.cloudData.locations],
-            tokens: [...conflictData.localData.tokens, ...conflictData.cloudData.tokens]
+            locations: [...conflictData.localData.locations, ...conflictData.cloudData.locations]
           }
           break
       }
