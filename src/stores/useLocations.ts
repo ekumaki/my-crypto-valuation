@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { dbServiceV2, type Location, type LocationType } from '@/services/db-v2'
+import { secureStorage } from '@/services/storage.service'
 
 export const useLocationsStore = defineStore('locations', () => {
   const locations = ref<Location[]>([])
@@ -11,7 +12,7 @@ export const useLocationsStore = defineStore('locations', () => {
     try {
       isLoading.value = true
       error.value = null
-      locations.value = await dbServiceV2.getLocations()
+      locations.value = await secureStorage.getLocations()
     } catch (err) {
       error.value = '場所の読み込みに失敗しました'
       console.error('Failed to load locations:', err)
@@ -23,7 +24,7 @@ export const useLocationsStore = defineStore('locations', () => {
   async function addCustomLocation(name: string) {
     try {
       error.value = null
-      const location = await dbServiceV2.addCustomLocation(name)
+      const location = await secureStorage.addCustomLocation(name)
       locations.value.push(location)
       return location
     } catch (err) {

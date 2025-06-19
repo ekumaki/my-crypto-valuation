@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { dbServiceV2, type Holding, type Price } from '@/services/db-v2'
+import { secureStorage } from '@/services/storage.service'
 import { coinGeckoService } from '@/services/coingecko'
 import { useTokensStore } from './useTokens'
 
@@ -28,7 +29,7 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
     try {
       isLoading.value = true
       error.value = null
-      holdings.value = await dbServiceV2.getHoldings()
+      holdings.value = await secureStorage.getHoldings()
     } catch (err) {
       error.value = 'ポートフォリオの読み込みに失敗しました'
       console.error('Failed to load holdings:', err)
@@ -41,7 +42,7 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
     try {
       isLoading.value = true
       error.value = null
-      aggregatedHoldings.value = await dbServiceV2.getAggregatedHoldings()
+      aggregatedHoldings.value = await secureStorage.getAggregatedHoldings()
     } catch (err) {
       error.value = 'ポートフォリオの読み込みに失敗しました'
       console.error('Failed to load aggregated holdings:', err)
@@ -53,7 +54,7 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
   async function addHolding(holding: Omit<Holding, 'id' | 'createdAt' | 'updatedAt'>) {
     try {
       error.value = null
-      await dbServiceV2.addHolding(holding)
+      await secureStorage.addHolding(holding)
       await Promise.all([
         loadHoldings(),
         loadAggregatedHoldings()
@@ -69,7 +70,7 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
   async function updateHolding(id: string, updates: Partial<Omit<Holding, 'id' | 'createdAt'>>) {
     try {
       error.value = null
-      await dbServiceV2.updateHolding(id, updates)
+      await secureStorage.updateHolding(id, updates)
       await Promise.all([
         loadHoldings(),
         loadAggregatedHoldings()
@@ -85,7 +86,7 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
   async function deleteHolding(id: string) {
     try {
       error.value = null
-      await dbServiceV2.deleteHolding(id)
+      await secureStorage.deleteHolding(id)
       await Promise.all([
         loadHoldings(),
         loadAggregatedHoldings()

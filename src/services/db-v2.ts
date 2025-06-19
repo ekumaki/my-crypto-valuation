@@ -42,6 +42,18 @@ export class CryptoPortfolioDBV2 extends Dexie {
       prices: '[symbol+date], priceJpy, fetchedAt'
     })
 
+    this.version(2).stores({
+      locations: 'id, name, type, isCustom',
+      holdings: 'id, symbol, createdAt, updatedAt, isEncrypted, encryptedQuantity, encryptedLocationId, encryptedNote',
+      prices: '[symbol+date], priceJpy, fetchedAt'
+    }).upgrade(tx => {
+      return tx.table('holdings').toCollection().modify(holding => {
+        if (!holding.isEncrypted) {
+          holding.isEncrypted = false
+        }
+      })
+    })
+
     this.on('populate', () => this.populate())
   }
 
