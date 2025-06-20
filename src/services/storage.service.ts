@@ -93,6 +93,9 @@ export class SecureStorageService {
     
     const encryptedHolding = await this.encryptHolding(newHolding)
     
+    // Ensure token exists in tokens table
+    await dbServiceV2.ensureTokenExists(holding.symbol)
+    
     return await dbV2.table('holdings').add(encryptedHolding as any)
   }
   

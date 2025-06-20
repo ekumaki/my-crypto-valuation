@@ -146,6 +146,18 @@
 
     <!-- Action Buttons -->
     <div class="space-y-3">
+      <!-- Debug Info -->
+      <div class="mb-3 p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-md text-xs">
+        <p>Debug: isAuthenticated = {{ authStatus.isAuthenticated }}</p>
+        <p>Debug: isLoading = {{ authStatus.isLoading }}</p>
+        <p>Debug: Client ID = {{ clientId ? 'Set' : 'Not Set' }}</p>
+        <p>Debug: isInitialized = {{ googleAuthService.isInitialized.value }}</p>
+        <p>Debug: Error = {{ authStatus.error || 'None' }}</p>
+        <p>Debug: Sync Enabled = {{ syncStatus.isEnabled }}</p>
+        <p>Debug: Cloud File Exists = {{ syncStatus.cloudFileExists }}</p>
+        <p>Debug: Sync State = {{ JSON.stringify(syncStatus) }}</p>
+      </div>
+
       <!-- Google Sign In -->
       <button
         v-if="!authStatus.isAuthenticated"
@@ -165,7 +177,7 @@
       <!-- Enable Sync -->
       <button
         v-if="authStatus.isAuthenticated && !syncStatus.isEnabled"
-        @click="showPasswordSetup = true"
+        @click="handleEnableSyncClick"
         class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2 px-4 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
       >
         クラウド同期を有効にする
@@ -227,6 +239,9 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { googleAuthService } from '@/services/google-auth.service'
 import { syncService, type SyncConflict } from '@/services/sync.service'
 import { errorHandlerService } from '@/services/error-handler.service'
+import { useTokensStore } from '@/stores/useTokens'
+import { useHoldingsStoreV2 } from '@/stores/useHoldingsV2'
+import { useLocationsStore } from '@/stores/useLocations'
 import CloudPasswordSetup from './CloudPasswordSetup.vue'
 import CloudPasswordPrompt from './CloudPasswordPrompt.vue'
 import ConflictResolver from './ConflictResolver.vue'
@@ -235,6 +250,11 @@ const showPasswordSetup = ref(false)
 const showPasswordPrompt = ref(false)
 const showConflictResolver = ref(false)
 const conflictData = ref<SyncConflict | null>(null)
+
+// Store instances for refreshing after sync
+const tokensStore = useTokensStore()
+const holdingsStore = useHoldingsStoreV2()
+const locationsStore = useLocationsStore()
 
 // Computed reactive states
 const authStatus = computed(() => ({
@@ -246,12 +266,52 @@ const authStatus = computed(() => ({
 
 const syncStatus = computed(() => syncService.status.value)
 
+// Environment variables
+const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
+
+// Debug logging
+onMounted(async () => {
+  console.log('GoogleDriveConnection mounted')
+  console.log('Auth status:', authStatus.value)
+  console.log('Sync status:', syncStatus.value)
+  console.log('Client ID:', clientId)
+  
+  // Force Google Auth initialization
+  console.log('Force initializing Google Auth...')
+  await googleAuthService.forceInitialize()
+  console.log('Google Auth initialized:', googleAuthService.isInitialized.value)
+})
+
 // Methods
 async function signInToGoogle() {
   try {
     await googleAuthService.signIn()
   } catch (error) {
     errorHandlerService.handleError(error, 'Google Sign In', 'error')
+  }
+}
+
+async function handleEnableSyncClick() {
+  try {
+    console.log('handleEnableSyncClick called')
+    console.log('Current cloudFileExists:', syncStatus.value.cloudFileExists)
+    
+    // Force check for cloud file existence
+    await syncService.checkCloudFileExists()
+    
+    const cloudFileExists = syncStatus.value.cloudFileExists
+    console.log('After force check, cloudFileExists:', cloudFileExists)
+    
+    if (cloudFileExists) {
+      console.log('Cloud file exists - showing password prompt')
+      showPasswordPrompt.value = true
+    } else {
+      console.log('No cloud file - showing password setup')
+      showPasswordSetup.value = true
+    }
+  } catch (error) {
+    console.error('Enable sync check error:', error)
+    errorHandlerService.handleError(error, 'Enable Sync Check', 'error')
   }
 }
 
@@ -268,23 +328,66 @@ async function handlePasswordSetup(password: string) {
   showPasswordSetup.value = false
   
   try {
+    console.log('Enabling sync with password...')
     const result = await syncService.enableSync(password)
+    console.log('Enable sync result:', result)
+    
     if (!result.success) {
+      console.error('Enable sync failed:', result.message)
       if (result.conflictData) {
         conflictData.value = result.conflictData
         showConflictResolver.value = true
       } else {
         errorHandlerService.handleError(new Error(result.message), 'Enable Sync', 'error')
       }
+    } else {
+      console.log('Sync enabled successfully')
+      // Refresh all stores after successful sync enable to update UI
+      await Promise.all([
+        tokensStore.loadTokens(),
+        holdingsStore.loadHoldings(),
+        holdingsStore.loadAggregatedHoldings(),
+        locationsStore.loadLocations()
+      ])
+      console.log('Enable sync completed and stores refreshed')
     }
   } catch (error) {
+    console.error('Enable sync error:', error)
     errorHandlerService.handleError(error, 'Enable Sync', 'error')
   }
 }
 
 async function handlePasswordProvided(password: string) {
   showPasswordPrompt.value = false
-  // Handle password for existing cloud data
+  
+  try {
+    console.log('Testing cloud password for existing data...')
+    const result = await syncService.enableSync(password)
+    console.log('Enable sync result:', result)
+    
+    if (!result.success) {
+      console.error('Enable sync failed:', result.message)
+      if (result.conflictData) {
+        conflictData.value = result.conflictData
+        showConflictResolver.value = true
+      } else {
+        errorHandlerService.handleError(new Error(result.message), 'Enable Sync', 'error')
+      }
+    } else {
+      console.log('Sync enabled successfully from existing cloud data')
+      // Refresh all stores after successful sync enable to update UI
+      await Promise.all([
+        tokensStore.loadTokens(),
+        holdingsStore.loadHoldings(),
+        holdingsStore.loadAggregatedHoldings(),
+        locationsStore.loadLocations()
+      ])
+      console.log('Enable sync completed and stores refreshed')
+    }
+  } catch (error) {
+    console.error('Enable sync error:', error)
+    errorHandlerService.handleError(error, 'Enable Sync', 'error')
+  }
 }
 
 async function performManualSync() {
@@ -297,6 +400,15 @@ async function performManualSync() {
       } else {
         errorHandlerService.handleError(new Error(result.message), 'Manual Sync', 'error')
       }
+    } else {
+      // Refresh all stores after successful sync to update UI
+      await Promise.all([
+        tokensStore.loadTokens(),
+        holdingsStore.loadHoldings(),
+        holdingsStore.loadAggregatedHoldings(),
+        locationsStore.loadLocations()
+      ])
+      console.log('Manual sync completed and stores refreshed')
     }
   } catch (error) {
     errorHandlerService.handleError(error, 'Manual Sync', 'error')

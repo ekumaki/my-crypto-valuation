@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { dbService, type Token } from '@/services/db'
+import { dbV2, dbServiceV2, type Token } from '@/services/db-v2'
 import { coinGeckoService } from '@/services/coingecko'
 
 export const useTokensStore = defineStore('tokens', () => {
@@ -18,7 +18,7 @@ export const useTokensStore = defineStore('tokens', () => {
     try {
       isLoading.value = true
       error.value = null
-      tokens.value = await dbService.getTokens()
+      tokens.value = await dbV2.tokens.toArray()
     } catch (err) {
       error.value = 'トークンの読み込みに失敗しました'
       console.error('Failed to load tokens:', err)
@@ -37,7 +37,7 @@ export const useTokensStore = defineStore('tokens', () => {
         iconUrl: tokenData.iconUrl
       }
 
-      await dbService.addToken(token)
+      await dbServiceV2.addToken(token)
       await loadTokens()
       return true
     } catch (err) {
@@ -50,7 +50,7 @@ export const useTokensStore = defineStore('tokens', () => {
   async function removeToken(symbol: string) {
     try {
       error.value = null
-      await dbService.deleteToken(symbol)
+      await dbV2.tokens.delete(symbol)
       await loadTokens()
       return true
     } catch (err) {
