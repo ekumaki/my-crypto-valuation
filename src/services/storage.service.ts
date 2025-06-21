@@ -258,18 +258,23 @@ export class SecureStorageService {
   
   async getAuthState(): Promise<AuthState> {
     const authData = localStorage.getItem('crypto-portfolio-auth')
+    console.log('[DEBUG] getAuthState - raw localStorage data:', authData)
     if (!authData) {
       return { isAuthenticated: false }
     }
     
     try {
-      return JSON.parse(authData)
-    } catch {
+      const parsed = JSON.parse(authData)
+      console.log('[DEBUG] getAuthState - parsed data:', parsed)
+      return parsed
+    } catch (error) {
+      console.log('[DEBUG] getAuthState - parse error:', error)
       return { isAuthenticated: false }
     }
   }
   
   async setAuthState(state: AuthState): Promise<void> {
+    console.log('[DEBUG] setAuthState - setting state:', state)
     localStorage.setItem('crypto-portfolio-auth', JSON.stringify(state))
   }
   

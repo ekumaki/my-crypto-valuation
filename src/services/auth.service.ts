@@ -47,7 +47,8 @@ export class AuthService {
       
       await secureStorage.migrateUnencryptedData()
       
-      this.startIdleTimer()
+      // Temporarily disable idle timer for debugging
+      // this.startIdleTimer()
       
       return { success: true }
     } catch (error) {
@@ -88,12 +89,19 @@ export class AuthService {
       
       secureStorage.setEncryptionKey(key)
       
-      await secureStorage.setAuthState({
+      const newAuthState = {
         ...authState,
         isAuthenticated: true
-      })
+      }
+      console.log('[DEBUG] Setting auth state to:', newAuthState)
+      await secureStorage.setAuthState(newAuthState)
       
-      this.startIdleTimer()
+      // Verify it was set correctly
+      const verifyState = await secureStorage.getAuthState()
+      console.log('[DEBUG] Verified auth state after setting:', verifyState)
+      
+      // Temporarily disable idle timer for debugging
+      // this.startIdleTimer()
       
       return { success: true }
     } catch (error) {
@@ -188,7 +196,52 @@ export class AuthService {
   
   async isAuthenticated(): Promise<boolean> {
     const authState = await secureStorage.getAuthState()
+    console.log('[DEBUG] authService.isAuthenticated - authState:', authState)
+    return authState.isAuthenticated
+  }
+  
+  async isUnlockedAndAuthenticated(): Promise<boolean> {
+    const authState = await secureStorage.getAuthState()
     return authState.isAuthenticated && secureStorage.isUnlocked()
+  }
+  
+  async unlockWithPassword(password: string): Promise<LoginResult> {
+    try {
+      const authState = await secureStorage.getAuthState()
+      
+      if (!authState.isAuthenticated || !authState.passwordHash || !authState.salt) {
+        return {
+          success: false,
+          error: '認証情報が見つかりません'
+        }
+      }
+      
+      // Verify password against stored hash
+      const isValid = await CryptoService.verifyPassword(
+        password,
+        authState.passwordHash,
+        authState.salt
+      )
+      
+      if (!isValid) {
+        return {
+          success: false,
+          error: 'パスワードが正しくありません'
+        }
+      }
+      
+      // Derive encryption key and unlock storage
+      const { key } = await CryptoService.deriveKey(password)
+      secureStorage.setEncryptionKey(key)
+      
+      return { success: true }
+    } catch (error) {
+      console.error('Unlock failed:', error)
+      return {
+        success: false,
+        error: 'ロック解除に失敗しました'
+      }
+    }
   }
   
   validatePassword(password: string): PasswordValidation {

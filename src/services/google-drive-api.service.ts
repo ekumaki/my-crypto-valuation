@@ -222,31 +222,15 @@ class GoogleDriveApiService {
 
   async updateFile(fileId: string, data: string, metadata?: Partial<FileMetadata>): Promise<DriveFile> {
     try {
-      const boundary = '-------314159265358979323846'
-      const delimiter = `\r\n--${boundary}\r\n`
-      const close_delim = `\r\n--${boundary}--`
-
-      let body = ''
-      
-      if (metadata) {
-        body += delimiter
-        body += 'Content-Type: application/json\r\n\r\n'
-        body += JSON.stringify(metadata)
-      }
-      
-      body += delimiter
-      body += 'Content-Type: application/json\r\n\r\n'
-      body += data
-      body += close_delim
-
+      // Simple approach: update content only using media upload
       const response = await this.makeApiRequest(
         'PATCH',
-        `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=multipart&fields=id,name,mimeType,modifiedTime,size,parents`,
+        `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media&fields=id,name,mimeType,modifiedTime,size,parents`,
         {
           headers: {
-            'Content-Type': `multipart/related; boundary="${boundary}"`
+            'Content-Type': 'application/json'
           },
-          body
+          body: data
         }
       )
 

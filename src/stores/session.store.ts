@@ -6,6 +6,7 @@ export const useSessionStore = defineStore('session', () => {
   const isAuthenticated = ref(false)
   const isLoading = ref(false)
   const showWarning = ref(false)
+  const showUnlockPrompt = ref(false)
   const remainingTime = ref(0)
   const warningTimer = ref<number | null>(null)
   const sessionStartTime = ref<number>(0)
@@ -25,9 +26,12 @@ export const useSessionStore = defineStore('session', () => {
     isLoading.value = true
     try {
       isAuthenticated.value = await authService.isAuthenticated()
+      console.log('[DEBUG] Session initialize - isAuthenticated:', isAuthenticated.value)
       if (isAuthenticated.value) {
-        setupActivityListeners()
-        startWarningCountdown()
+        // Temporarily disable for debugging
+        // setupActivityListeners()
+        // startWarningCountdown()
+        console.log('[DEBUG] Session initialized successfully, but timers disabled for debugging')
       }
     } finally {
       isLoading.value = false
@@ -145,17 +149,48 @@ export const useSessionStore = defineStore('session', () => {
 
   document.addEventListener('visibilitychange', handleVisibilityChange)
 
-  window.addEventListener('beforeunload', () => {
-    if (isAuthenticated.value) {
-      authService.logout()
-    }
-  })
+  // TEMPORARILY COMMENTED OUT - This was causing logout on page refresh
+  // window.addEventListener('beforeunload', () => {
+  //   if (isAuthenticated.value) {
+  //     authService.logout()
+  //   }
+  // })
   
+  async function requestUnlock(): Promise<boolean> {
+    return new Promise((resolve) => {
+      showUnlockPrompt.value = true
+      
+      const handleUnlock = () => {
+        showUnlockPrompt.value = false
+        resolve(true)
+      }
+      
+      const handleCancel = () => {
+        showUnlockPrompt.value = false
+        resolve(false)
+      }
+      
+      // Store these handlers for the component to use
+      ;(window as any)._unlockHandlers = { handleUnlock, handleCancel }
+    })
+  }
+  
+  function handleUnlockSuccess() {
+    showUnlockPrompt.value = false
+    ;(window as any)._unlockHandlers?.handleUnlock()
+  }
+  
+  function handleUnlockCancel() {
+    showUnlockPrompt.value = false
+    ;(window as any)._unlockHandlers?.handleCancel()
+  }
+
   return {
     isAuthenticated,
     isLoading,
     isLocked,
     showWarning,
+    showUnlockPrompt,
     remainingTime,
     remainingMinutes,
     remainingSeconds,
@@ -163,6 +198,9 @@ export const useSessionStore = defineStore('session', () => {
     initialize,
     login,
     logout,
-    extendSession
+    extendSession,
+    requestUnlock,
+    handleUnlockSuccess,
+    handleUnlockCancel
   }
 })

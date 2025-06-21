@@ -3,13 +3,30 @@
     <!-- Session Timeout Warning -->
     <TimeoutWarning />
     
+    <!-- Unlock Prompt -->
+    <UnlockPrompt 
+      v-if="sessionStore.showUnlockPrompt"
+      @unlock="sessionStore.handleUnlockSuccess"
+      @cancel="sessionStore.handleUnlockCancel"
+    />
+    
+    <!-- Debug Info -->
+    <div v-if="showDebugInfo" class="fixed top-0 right-0 bg-red-100 dark:bg-red-900 p-4 m-4 rounded shadow-lg z-50 max-w-md">
+      <h4 class="font-bold text-red-800 dark:text-red-200 mb-2">🐛 Debug Info</h4>
+      <pre class="text-xs text-red-700 dark:text-red-300 whitespace-pre-wrap">{{ debugInfo }}</pre>
+      <button @click="showDebugInfo = false" class="mt-2 px-2 py-1 bg-red-200 dark:bg-red-800 rounded text-xs">Close</button>
+    </div>
+
     <!-- Login Screen -->
     <LoginForm v-if="sessionStore.isLocked" @login-success="handleLoginSuccess" />
     
     <!-- Main App -->
     <div v-else>
       <!-- Session Banner -->
-      <SessionBanner @open-password-settings="showPasswordSettings = true" />
+      <SessionBanner 
+        @open-password-settings="showPasswordSettings = true"
+        @open-cloud-sync="showCloudSync = true"
+      />
       
       <!-- Header -->
       <header class="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700">
@@ -123,6 +140,7 @@ import Toast from '@/components/Toast.vue'
 import LoginForm from '@/components/LoginForm.vue'
 import SessionBanner from '@/components/SessionBanner.vue'
 import TimeoutWarning from '@/components/TimeoutWarning.vue'
+import UnlockPrompt from '@/components/UnlockPrompt.vue'
 import PasswordSettings from '@/components/PasswordSettings.vue'
 import GoogleDriveConnection from '@/components/GoogleDriveConnection.vue'
 import { useSessionStore } from '@/stores/session.store'
@@ -132,6 +150,8 @@ const sessionStore = useSessionStore()
 const isDark = ref(document.documentElement.classList.contains('dark'))
 const showPasswordSettings = ref(false)
 const showCloudSync = ref(false)
+const showDebugInfo = ref(true)
+const debugInfo = ref('')
 
 function toggleDarkMode() {
   isDark.value = !isDark.value
@@ -154,6 +174,23 @@ function handlePasswordChangeSuccess() {
 }
 
 onMounted(async () => {
+  // Collect debug information
+  let debug = 'App.vue onMounted Debug Info:\n'
+  debug += `Timestamp: ${new Date().toISOString()}\n\n`
+  
+  // Check localStorage directly
+  const authData = localStorage.getItem('crypto-portfolio-auth')
+  debug += `localStorage['crypto-portfolio-auth']: ${authData}\n`
+  
+  if (authData) {
+    try {
+      const parsed = JSON.parse(authData)
+      debug += `Parsed auth data: ${JSON.stringify(parsed, null, 2)}\n`
+    } catch (e) {
+      debug += `Parse error: ${e.message}\n`
+    }
+  }
+  
   // Initialize dark mode from localStorage
   const savedDarkMode = localStorage.getItem('darkMode')
   if (savedDarkMode === 'true') {
@@ -170,7 +207,15 @@ onMounted(async () => {
     }
   }
   
+  debug += '\nBefore sessionStore.initialize()\n'
+  
   // Initialize session
   await sessionStore.initialize()
+  
+  debug += `After sessionStore.initialize():\n`
+  debug += `sessionStore.isAuthenticated: ${sessionStore.isAuthenticated}\n`
+  debug += `sessionStore.isLocked: ${sessionStore.isLocked}\n`
+  
+  debugInfo.value = debug
 })
 </script>

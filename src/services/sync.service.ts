@@ -61,6 +61,16 @@ class SyncService {
         this._status.value = { ...this._status.value, ...parsed }
       }
 
+      // Load cloud password if sync is enabled
+      if (this._status.value.isEnabled) {
+        const savedPassword = localStorage.getItem('cloudPassword')
+        if (savedPassword) {
+          this._cloudPassword.value = savedPassword
+        } else {
+          this._status.value.isEnabled = false
+        }
+      }
+
       // Check if local data exists
       const holdings = await dbV2.holdings.toArray()
       this._status.value.localDataExists = holdings.length > 0
@@ -81,12 +91,22 @@ class SyncService {
       lastSyncError: this._status.value.lastSyncError
     }
     localStorage.setItem('syncStatus', JSON.stringify(statusToSave))
+    
+    // Save cloud password if enabled
+    if (this._status.value.isEnabled && this._cloudPassword.value) {
+      localStorage.setItem('cloudPassword', this._cloudPassword.value)
+    } else if (!this._status.value.isEnabled) {
+      localStorage.removeItem('cloudPassword')
+    }
   }
 
-  private async checkCloudFileExists(): Promise<void> {
+  async checkCloudFileExists(): Promise<void> {
     try {
+      console.log('Checking for cloud backup file...')
       const backupFile = await googleDriveApiService.findBackupFile()
       this._status.value.cloudFileExists = backupFile !== null
+      console.log('Cloud file check result:', backupFile !== null)
+      console.log('Backup file:', backupFile)
     } catch (error) {
       console.error('Failed to check cloud file existence:', error)
       this._status.value.cloudFileExists = false
@@ -162,7 +182,7 @@ class SyncService {
       
       if (!backupFile) {
         // No cloud backup exists, upload local data
-        if (localData.holdings.length > 0) {
+        if (localData.holdings.length > 0 || localData.tokens.length > 0) {
           await this.uploadToCloud(localData)
           this._status.value.lastSyncTime = Date.now()
           this.saveSyncStatus()
@@ -223,12 +243,17 @@ class SyncService {
   }
 
   private async getLocalData(): Promise<any> {
-    const holdings = await dbV2.holdings.toArray()
+    // Import secure storage to get decrypted data
+    const { secureStorage } = await import('@/services/storage.service')
+    
+    const holdings = await secureStorage.getHoldings()
     const locations = await dbV2.locations.toArray()
+    const tokens = await dbV2.tokens.toArray()
     
     return {
       holdings,
-      locations
+      locations,
+      tokens
     }
   }
 
@@ -302,15 +327,88 @@ class SyncService {
   }
 
   private async updateLocalData(data: any): Promise<void> {
-    await dbV2.transaction('rw', [dbV2.holdings, dbV2.locations], async () => {
-      await dbV2.holdings.clear()
+    const { secureStorage } = await import('@/services/storage.service')
+    
+    console.log('updateLocalData called with:', data)
+    console.log('secureStorage isUnlocked:', secureStorage.isUnlocked())
+    
+    // Clear existing data
+    await dbV2.holdings.clear()
+    
+    // Add holdings using secure storage to maintain encryption compatibility
+    if (data.holdings && Array.isArray(data.holdings)) {
+      console.log('Adding holdings:', data.holdings.length)
+      for (const holding of data.holdings) {
+        console.log('Adding holding:', holding)
+        try {
+          await secureStorage.addHolding({
+            symbol: holding.symbol,
+            quantity: holding.quantity,
+            locationId: holding.locationId,
+            note: holding.note || ''
+          })
+          console.log('Successfully added holding:', holding.symbol)
+        } catch (error) {
+          console.error('Failed to add holding:', holding, error)
+          throw error
+        }
+      }
+    }
+    
+    // Update locations directly (not encrypted)
+    if (data.locations && Array.isArray(data.locations)) {
       await dbV2.locations.clear()
-      
-      if (data.holdings) await dbV2.holdings.bulkAdd(data.holdings)
-      if (data.locations) await dbV2.locations.bulkAdd(data.locations)
-    })
+      const cleanLocations = data.locations.map(this.cleanObjectForDB)
+      await dbV2.locations.bulkAdd(cleanLocations)
+    }
+    
+    // Update tokens directly (not encrypted)
+    if (data.tokens && Array.isArray(data.tokens)) {
+      await dbV2.tokens.clear()
+      const cleanTokens = data.tokens.map(this.cleanObjectForDB)
+      await dbV2.tokens.bulkAdd(cleanTokens)
+      console.log('Added tokens:', data.tokens.length)
+    }
     
     localStorage.setItem('lastDataModified', Date.now().toString())
+    console.log('updateLocalData completed successfully')
+  }
+
+  /**
+   * Cleans object for IndexedDB storage by removing non-cloneable properties
+   */
+  private cleanObjectForDB(obj: any): any {
+    if (obj === null || obj === undefined) {
+      return obj
+    }
+    
+    if (typeof obj !== 'object') {
+      return obj
+    }
+    
+    // Create a clean object with only serializable properties
+    const cleaned: any = {}
+    
+    for (const [key, value] of Object.entries(obj)) {
+      if (value !== undefined && value !== null) {
+        if (typeof value === 'object') {
+          if (Array.isArray(value)) {
+            cleaned[key] = value.map(item => this.cleanObjectForDB(item))
+          } else if (value instanceof Date) {
+            cleaned[key] = value
+          } else {
+            cleaned[key] = this.cleanObjectForDB(value)
+          }
+        } else if (typeof value === 'function') {
+          // Skip functions
+          continue
+        } else {
+          cleaned[key] = value
+        }
+      }
+    }
+    
+    return cleaned
   }
 
   async resolveConflict(resolution: 'local' | 'cloud' | 'merge', conflictData: SyncConflict): Promise<SyncResult> {
@@ -330,7 +428,8 @@ class SyncService {
           // Simple merge strategy - could be more sophisticated
           finalData = {
             holdings: [...conflictData.localData.holdings, ...conflictData.cloudData.holdings],
-            locations: [...conflictData.localData.locations, ...conflictData.cloudData.locations]
+            locations: [...conflictData.localData.locations, ...conflictData.cloudData.locations],
+            tokens: [...(conflictData.localData.tokens || []), ...(conflictData.cloudData.tokens || [])]
           }
           break
       }
@@ -378,7 +477,12 @@ class SyncService {
         return true // No cloud file to test against
       }
 
-      await this.downloadFromCloud(backupFile.id)
+      // Test decryption with the provided password
+      const encryptedDataString = await googleDriveApiService.downloadFile(backupFile.id)
+      const encryptedData: EncryptedData = JSON.parse(encryptedDataString)
+      
+      // Try to decrypt with the provided password
+      await cloudEncryptionService.decryptPortfolioData(encryptedData, password)
       return true
     } catch (error) {
       console.error('Cloud password test failed:', error)

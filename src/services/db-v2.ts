@@ -28,10 +28,18 @@ export interface Price {
   fetchedAt: number
 }
 
+export interface Token {
+  symbol: string
+  name: string
+  id: string
+  iconUrl?: string
+}
+
 export class CryptoPortfolioDBV2 extends Dexie {
   locations!: Table<Location>
   holdings!: Table<Holding>
   prices!: Table<Price>
+  tokens!: Table<Token>
 
   constructor() {
     super('cryptoPortfolioV2')
@@ -52,6 +60,13 @@ export class CryptoPortfolioDBV2 extends Dexie {
           holding.isEncrypted = false
         }
       })
+    })
+
+    this.version(3).stores({
+      locations: 'id, name, type, isCustom',
+      holdings: 'id, symbol, createdAt, updatedAt, isEncrypted, encryptedQuantity, encryptedLocationId, encryptedNote',
+      prices: '[symbol+date], symbol, priceJpy, fetchedAt',
+      tokens: 'symbol, name, id'
     })
 
     this.on('populate', () => this.populate())
@@ -86,7 +101,27 @@ export class CryptoPortfolioDBV2 extends Dexie {
       { id: 'trezor', name: 'Trezor', type: 'hw_wallet', isCustom: false }
     ]
 
+    // Populate with preset tokens
+    const presetTokens: Token[] = [
+      { symbol: 'BTC', name: 'Bitcoin', id: 'bitcoin' },
+      { symbol: 'ETH', name: 'Ethereum', id: 'ethereum' },
+      { symbol: 'BNB', name: 'BNB', id: 'binancecoin' },
+      { symbol: 'ADA', name: 'Cardano', id: 'cardano' },
+      { symbol: 'SOL', name: 'Solana', id: 'solana' },
+      { symbol: 'XRP', name: 'XRP', id: 'ripple' },
+      { symbol: 'DOT', name: 'Polkadot', id: 'polkadot' },
+      { symbol: 'DOGE', name: 'Dogecoin', id: 'dogecoin' },
+      { symbol: 'AVAX', name: 'Avalanche', id: 'avalanche-2' },
+      { symbol: 'SHIB', name: 'Shiba Inu', id: 'shiba-inu' },
+      { symbol: 'MATIC', name: 'Polygon', id: 'matic-network' },
+      { symbol: 'LTC', name: 'Litecoin', id: 'litecoin' },
+      { symbol: 'ATOM', name: 'Cosmos', id: 'cosmos' },
+      { symbol: 'LINK', name: 'Chainlink', id: 'chainlink' },
+      { symbol: 'UNI', name: 'Uniswap', id: 'uniswap' }
+    ]
+
     await this.locations.bulkAdd(presetLocations)
+    await this.tokens.bulkAdd(presetTokens)
   }
 }
 
@@ -198,7 +233,6 @@ export const dbServiceV2 = {
     return await dbV2.prices
       .where('symbol')
       .equals(symbol.toUpperCase())
-      .orderBy('fetchedAt')
       .reverse()
       .first()
   },
@@ -207,6 +241,29 @@ export const dbServiceV2 = {
   isPriceFresh(price: Price): boolean {
     const TWELVE_HOURS = 12 * 60 * 60 * 1000
     return Date.now() - price.fetchedAt < TWELVE_HOURS
+  },
+
+  // Token operations
+  async getToken(symbol: string): Promise<Token | undefined> {
+    return await dbV2.tokens.get(symbol.toUpperCase())
+  },
+
+  async addToken(token: Token): Promise<void> {
+    await dbV2.tokens.put({ ...token, symbol: token.symbol.toUpperCase() })
+  },
+
+  async ensureTokenExists(symbol: string): Promise<void> {
+    const upperSymbol = symbol.toUpperCase()
+    const existingToken = await this.getToken(upperSymbol)
+    
+    if (!existingToken) {
+      // Add token with symbol as name for unknown tokens
+      await this.addToken({
+        symbol: upperSymbol,
+        name: upperSymbol, // Use symbol as name for unknown tokens
+        id: upperSymbol.toLowerCase()
+      })
+    }
   },
 
   // Clear all data (for testing)

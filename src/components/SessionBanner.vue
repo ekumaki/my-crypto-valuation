@@ -50,6 +50,12 @@
             <div v-if="showDropdown" class="absolute right-0 mt-1 w-48 bg-white dark:bg-gray-800 rounded-md shadow-lg border border-gray-200 dark:border-gray-700 z-10">
               <div class="py-1">
                 <button
+                  @click="openCloudSync"
+                  class="block w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+                >
+                  クラウド同期
+                </button>
+                <button
                   @click="openPasswordSettings"
                   class="block w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
                 >
@@ -77,6 +83,7 @@ import { syncService } from '@/services/sync.service'
 
 const emit = defineEmits<{
   openPasswordSettings: []
+  openCloudSync: []
 }>()
 
 const sessionStore = useSessionStore()
@@ -94,6 +101,11 @@ function logout() {
 function openPasswordSettings() {
   showDropdown.value = false
   emit('openPasswordSettings')
+}
+
+function openCloudSync() {
+  showDropdown.value = false
+  emit('openCloudSync')
 }
 
 function formatSyncTime(timestamp: number): string {

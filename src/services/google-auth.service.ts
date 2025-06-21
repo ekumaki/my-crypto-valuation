@@ -17,6 +17,7 @@ class GoogleAuthService {
   
   private authInstance: any = null
   private gapiLoaded = false
+  private accessToken: string | null = null
 
   constructor() {
     this.initializeGoogleAPI()
@@ -34,46 +35,52 @@ class GoogleAuthService {
       this._isLoading.value = true
       this._error.value = null
 
+      // Check if Client ID is configured
+      if (!GOOGLE_DRIVE_CONFIG.clientId) {
+        console.warn('Google Drive Client ID not configured')
+        this._error.value = 'Google Drive Client ID が設定されていません'
+        this._isInitialized.value = false
+        return
+      }
+
       // Load Google API if not already loaded
       if (!this.gapiLoaded) {
         await this.loadGoogleAPI()
       }
 
-      // Initialize gapi
+      // Initialize gapi client
       await new Promise<void>((resolve, reject) => {
-        window.gapi.load('auth2:client', {
+        window.gapi.load('client', {
           callback: resolve,
           onerror: reject
         })
       })
 
-      // Initialize the auth client
+      // Initialize the API client
       await window.gapi.client.init({
         apiKey: GOOGLE_DRIVE_CONFIG.apiKey,
-        clientId: GOOGLE_DRIVE_CONFIG.clientId,
-        discoveryDocs: [GOOGLE_DRIVE_CONFIG.discoveryDoc],
-        scope: GOOGLE_DRIVE_CONFIG.scopes.join(' ')
+        discoveryDocs: [GOOGLE_DRIVE_CONFIG.discoveryDoc]
       })
 
-      this.authInstance = window.gapi.auth2.getAuthInstance()
-      
-      // Check if user is already signed in
-      if (this.authInstance.isSignedIn.get()) {
-        this.handleAuthSuccess()
-      }
+      // Initialize Google Identity Services
+      window.google.accounts.id.initialize({
+        client_id: GOOGLE_DRIVE_CONFIG.clientId,
+        callback: this.handleCredentialResponse.bind(this)
+      })
 
-      // Listen for sign-in state changes
-      this.authInstance.isSignedIn.listen((isSignedIn: boolean) => {
-        if (isSignedIn) {
-          this.handleAuthSuccess()
-        } else {
-          this.handleSignOut()
-        }
+      // Initialize OAuth for Drive API access
+      this.authInstance = window.google.accounts.oauth2.initTokenClient({
+        client_id: GOOGLE_DRIVE_CONFIG.clientId,
+        scope: GOOGLE_DRIVE_CONFIG.scopes.join(' '),
+        callback: this.handleTokenResponse.bind(this)
       })
 
       this._isInitialized.value = true
+      console.log('Google API initialized successfully')
     } catch (error) {
       console.error('Failed to initialize Google API:', error)
+      console.error('Error details:', error.message || error)
+      console.error('Client ID:', GOOGLE_DRIVE_CONFIG.clientId)
       this._error.value = ERROR_MESSAGES.AUTH_FAILED
     } finally {
       this._isLoading.value = false
@@ -82,46 +89,78 @@ class GoogleAuthService {
 
   private async loadGoogleAPI(): Promise<void> {
     return new Promise((resolve, reject) => {
-      // Check if gapi is already loaded
-      if (window.gapi) {
+      // Check if google is already loaded
+      if (window.google && window.gapi) {
+        console.log('Google APIs already loaded')
         this.gapiLoaded = true
         resolve()
         return
       }
 
-      // Create script element
-      const script = document.createElement('script')
-      script.src = 'https://apis.google.com/js/api.js'
-      script.onload = () => {
-        this.gapiLoaded = true
-        resolve()
+      console.log('Loading Google Identity Services...')
+      
+      // Load Google Identity Services (new library)
+      const gsiScript = document.createElement('script')
+      gsiScript.src = 'https://accounts.google.com/gsi/client'
+      gsiScript.onload = () => {
+        console.log('Google Identity Services loaded')
+        
+        // Load Google API client library
+        const gapiScript = document.createElement('script')
+        gapiScript.src = 'https://apis.google.com/js/api.js'
+        gapiScript.onload = () => {
+          console.log('Google API client loaded successfully')
+          this.gapiLoaded = true
+          resolve()
+        }
+        gapiScript.onerror = () => {
+          console.error('Failed to load Google API client')
+          reject(new Error('Failed to load Google API client'))
+        }
+        document.head.appendChild(gapiScript)
       }
-      script.onerror = () => {
-        reject(new Error('Failed to load Google API'))
+      gsiScript.onerror = () => {
+        console.error('Failed to load Google Identity Services')
+        reject(new Error('Failed to load Google Identity Services'))
       }
       
-      document.head.appendChild(script)
+      document.head.appendChild(gsiScript)
     })
   }
 
-  private handleAuthSuccess(): void {
-    const currentUser = this.authInstance.currentUser.get()
-    const profile = currentUser.getBasicProfile()
-    
-    this._user.value = {
-      id: profile.getId(),
-      email: profile.getEmail(),
-      name: profile.getName(),
-      picture: profile.getImageUrl()
+  private handleCredentialResponse(response: any): void {
+    console.log('ID token received:', response.credential)
+    // This is for ID token (sign-in), we mainly need OAuth token for Drive API
+  }
+
+  private handleTokenResponse(response: any): void {
+    console.log('OAuth token received:', response)
+    if (response.access_token) {
+      // Store access token
+      this.accessToken = response.access_token
+      
+      // Set access token for gapi client
+      window.gapi.client.setToken({ access_token: response.access_token })
+      
+      // Update authentication state
+      this._isAuthenticated.value = true
+      this._error.value = null
+      
+      // You could decode the ID token to get user info, but for simplicity:
+      this._user.value = {
+        id: 'user_id',
+        email: 'user@example.com',
+        name: 'User Name',
+        picture: undefined
+      }
     }
-    
-    this._isAuthenticated.value = true
-    this._error.value = null
   }
 
   private handleSignOut(): void {
     this._user.value = null
     this._isAuthenticated.value = false
+    this.accessToken = null
+    window.gapi.client.setToken(null)
   }
 
   async signIn(): Promise<void> {
@@ -133,7 +172,8 @@ class GoogleAuthService {
         throw new Error('Google Auth not initialized')
       }
 
-      await this.authInstance.signIn()
+      // Request OAuth token
+      this.authInstance.requestAccessToken()
     } catch (error) {
       console.error('Sign in failed:', error)
       this._error.value = ERROR_MESSAGES.AUTH_FAILED
@@ -160,13 +200,11 @@ class GoogleAuthService {
   }
 
   getAccessToken(): string | null {
-    if (!this.authInstance || !this._isAuthenticated.value) {
+    if (!this._isAuthenticated.value) {
       return null
     }
 
-    const currentUser = this.authInstance.currentUser.get()
-    const authResponse = currentUser.getAuthResponse()
-    return authResponse.access_token
+    return this.accessToken
   }
 
   async refreshToken(): Promise<string | null> {
@@ -175,9 +213,10 @@ class GoogleAuthService {
         return null
       }
 
-      const currentUser = this.authInstance.currentUser.get()
-      const authResponse = await currentUser.reloadAuthResponse()
-      return authResponse.access_token
+      // Request new access token
+      this.authInstance.requestAccessToken()
+      // The handleTokenResponse will be called with the new token
+      return this.accessToken
     } catch (error) {
       console.error('Failed to refresh token:', error)
       this._error.value = 'トークンの更新に失敗しました'
@@ -187,6 +226,31 @@ class GoogleAuthService {
 
   clearError(): void {
     this._error.value = null
+  }
+
+  async waitForInitialization(): Promise<void> {
+    if (this._isInitialized.value) {
+      return
+    }
+
+    // Wait for initialization to complete
+    return new Promise((resolve) => {
+      const checkInitialized = () => {
+        if (this._isInitialized.value) {
+          resolve()
+        } else {
+          setTimeout(checkInitialized, 100)
+        }
+      }
+      checkInitialized()
+    })
+  }
+
+  async forceInitialize(): Promise<void> {
+    console.log('Force initializing Google Auth service...')
+    this._isInitialized.value = false
+    this._error.value = null
+    await this.initializeGoogleAPI()
   }
 }
 

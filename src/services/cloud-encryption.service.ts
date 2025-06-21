@@ -45,7 +45,7 @@ class CloudEncryptionService {
    * Generates a random IV
    */
   private generateIV(): CryptoJS.lib.WordArray {
-    return CryptoJS.lib.WordArray.random(96 / 8) // 12 bytes for GCM
+    return CryptoJS.lib.WordArray.random(128 / 8) // 16 bytes for CBC
   }
 
   /**
@@ -77,21 +77,18 @@ class CloudEncryptionService {
       // Derive key from password
       const key = this.deriveKey(password, salt)
       
-      // Encrypt using AES-GCM
+      // Encrypt using AES-CBC
       const encrypted = CryptoJS.AES.encrypt(dataToEncrypt, key, {
         iv: iv,
-        mode: CryptoJS.mode.GCM,
-        padding: CryptoJS.pad.NoPadding
+        mode: CryptoJS.mode.CBC,
+        padding: CryptoJS.pad.Pkcs7
       })
 
-      // Extract authentication tag (GCM mode provides authentication)
-      const tag = encrypted.tag || CryptoJS.lib.WordArray.create()
-
       return {
-        data: encrypted.ciphertext.toString(CryptoJS.enc.Base64),
+        data: encrypted.toString(),
         iv: iv.toString(CryptoJS.enc.Base64),
         salt: salt.toString(CryptoJS.enc.Base64),
-        tag: tag.toString(CryptoJS.enc.Base64),
+        tag: '', // Not used in CBC mode
         version: this.ENCRYPTION_VERSION
       }
     } catch (error) {
@@ -106,25 +103,17 @@ class CloudEncryptionService {
   async decryptPortfolioData(encryptedData: EncryptedData, password: string): Promise<CloudBackupData> {
     try {
       // Parse encrypted data
-      const ciphertext = CryptoJS.enc.Base64.parse(encryptedData.data)
       const iv = CryptoJS.enc.Base64.parse(encryptedData.iv)
       const salt = CryptoJS.enc.Base64.parse(encryptedData.salt)
-      const tag = CryptoJS.enc.Base64.parse(encryptedData.tag)
       
       // Derive key from password
       const key = this.deriveKey(password, salt)
       
-      // Create cipher params for GCM mode
-      const cipherParams = CryptoJS.lib.CipherParams.create({
-        ciphertext: ciphertext,
-        tag: tag
-      })
-      
-      // Decrypt using AES-GCM
-      const decrypted = CryptoJS.AES.decrypt(cipherParams, key, {
+      // Decrypt using AES-CBC
+      const decrypted = CryptoJS.AES.decrypt(encryptedData.data, key, {
         iv: iv,
-        mode: CryptoJS.mode.GCM,
-        padding: CryptoJS.pad.NoPadding
+        mode: CryptoJS.mode.CBC,
+        padding: CryptoJS.pad.Pkcs7
       })
       
       const decryptedData = decrypted.toString(CryptoJS.enc.Utf8)

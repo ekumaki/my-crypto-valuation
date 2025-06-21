@@ -255,14 +255,19 @@ async function updatePrices() {
 onMounted(async () => {
   await Promise.all([
     tokensStore.loadTokens(),
-    locationsStore.loadLocations(),
-    holdingsStore.loadAggregatedHoldings(),
-    holdingsStore.loadPrices()
+    locationsStore.loadLocations()
   ])
   
-  // Auto-update prices if holdings exist
-  if (holdingsStore.aggregatedHoldings.size > 0) {
-    await holdingsStore.updatePrices()
-  }
+  // Load encrypted holdings with unlock prompt if needed
+  const { withEncryption } = await import('@/utils/encryption-guard')
+  await withEncryption(async () => {
+    await holdingsStore.loadAggregatedHoldings()
+    await holdingsStore.loadPrices()
+    
+    // Auto-update prices if holdings exist
+    if (holdingsStore.aggregatedHoldings.size > 0) {
+      await holdingsStore.updatePrices()
+    }
+  })
 })
 </script>
