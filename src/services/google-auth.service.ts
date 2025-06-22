@@ -20,6 +20,7 @@ class GoogleAuthService {
   private accessToken: string | null = null
 
   constructor() {
+    this.loadPersistedAuthState()
     this.initializeGoogleAPI()
   }
 
@@ -50,34 +51,39 @@ class GoogleAuthService {
 
       // Initialize gapi client
       await new Promise<void>((resolve, reject) => {
-        window.gapi.load('client', {
+        ;(window as any).gapi.load('client', {
           callback: resolve,
           onerror: reject
         })
       })
 
       // Initialize the API client
-      await window.gapi.client.init({
+      await (window as any).gapi.client.init({
         apiKey: GOOGLE_DRIVE_CONFIG.apiKey,
         discoveryDocs: [GOOGLE_DRIVE_CONFIG.discoveryDoc]
       })
 
       // Initialize Google Identity Services
-      window.google.accounts.id.initialize({
+      ;(window as any).google.accounts.id.initialize({
         client_id: GOOGLE_DRIVE_CONFIG.clientId,
         callback: this.handleCredentialResponse.bind(this)
       })
 
       // Initialize OAuth for Drive API access
-      this.authInstance = window.google.accounts.oauth2.initTokenClient({
+      this.authInstance = (window as any).google.accounts.oauth2.initTokenClient({
         client_id: GOOGLE_DRIVE_CONFIG.clientId,
         scope: GOOGLE_DRIVE_CONFIG.scopes.join(' '),
         callback: this.handleTokenResponse.bind(this)
       })
 
+      // Restore token if available and set it for gapi client
+      if (this.accessToken) {
+        ;(window as any).gapi.client.setToken({ access_token: this.accessToken })
+      }
+
       this._isInitialized.value = true
       console.log('Google API initialized successfully')
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to initialize Google API:', error)
       console.error('Error details:', error.message || error)
       console.error('Client ID:', GOOGLE_DRIVE_CONFIG.clientId)
@@ -90,7 +96,7 @@ class GoogleAuthService {
   private async loadGoogleAPI(): Promise<void> {
     return new Promise((resolve, reject) => {
       // Check if google is already loaded
-      if (window.google && window.gapi) {
+      if ((window as any).google && (window as any).gapi) {
         console.log('Google APIs already loaded')
         this.gapiLoaded = true
         resolve()
@@ -140,7 +146,7 @@ class GoogleAuthService {
       this.accessToken = response.access_token
       
       // Set access token for gapi client
-      window.gapi.client.setToken({ access_token: response.access_token })
+      ;(window as any).gapi.client.setToken({ access_token: response.access_token })
       
       // Update authentication state
       this._isAuthenticated.value = true
@@ -153,6 +159,9 @@ class GoogleAuthService {
         name: 'User Name',
         picture: undefined
       }
+      
+      // Persist authentication state
+      this.persistAuthState()
     }
   }
 
@@ -160,7 +169,54 @@ class GoogleAuthService {
     this._user.value = null
     this._isAuthenticated.value = false
     this.accessToken = null
-    window.gapi.client.setToken(null)
+    ;(window as any).gapi.client.setToken(null)
+    this.clearPersistedAuthState()
+  }
+
+  private loadPersistedAuthState(): void {
+    try {
+      const authData = localStorage.getItem('google_auth_state')
+      if (authData) {
+        const parsed = JSON.parse(authData)
+        if (parsed.accessToken && parsed.expiresAt > Date.now()) {
+          this.accessToken = parsed.accessToken
+          this._isAuthenticated.value = true
+          this._user.value = parsed.user || {
+            id: 'user_id',
+            email: 'user@example.com',
+            name: 'User Name',
+            picture: undefined
+          }
+        } else {
+          // Token expired, clear it
+          this.clearPersistedAuthState()
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load persisted auth state:', error)
+      this.clearPersistedAuthState()
+    }
+  }
+
+  private persistAuthState(): void {
+    try {
+      const authData = {
+        accessToken: this.accessToken,
+        user: this._user.value,
+        expiresAt: Date.now() + (3600 * 1000) // 1 hour from now
+      }
+      localStorage.setItem('google_auth_state', JSON.stringify(authData))
+    } catch (error) {
+      console.error('Failed to persist auth state:', error)
+    }
+  }
+
+  private clearPersistedAuthState(): void {
+    try {
+      localStorage.removeItem('google_auth_state')
+    } catch (error) {
+      console.error('Failed to clear persisted auth state:', error)
+    }
   }
 
   async signIn(): Promise<void> {

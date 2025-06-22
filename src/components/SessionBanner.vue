@@ -36,7 +36,7 @@
             残り時間: {{ remainingDisplay }}
           </div>
           
-          <div class="relative">
+          <div class="relative" ref="dropdownRef">
             <button
               @click="showDropdown = !showDropdown"
               class="text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors flex items-center space-x-1"
@@ -77,7 +77,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useSessionStore } from '@/stores/session.store'
 import { syncService } from '@/services/sync.service'
 
@@ -88,6 +88,7 @@ const emit = defineEmits<{
 
 const sessionStore = useSessionStore()
 const showDropdown = ref(false)
+const dropdownRef = ref<HTMLElement | null>(null)
 
 const remainingMinutes = computed(() => sessionStore.remainingMinutes)
 const remainingDisplay = computed(() => sessionStore.remainingDisplay)
@@ -124,4 +125,18 @@ function formatSyncTime(timestamp: number): string {
     return date.toLocaleDateString('ja-JP')
   }
 }
+
+function handleClickOutside(event: Event) {
+  if (dropdownRef.value && !dropdownRef.value.contains(event.target as Node)) {
+    showDropdown.value = false
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('click', handleClickOutside)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', handleClickOutside)
+})
 </script>
