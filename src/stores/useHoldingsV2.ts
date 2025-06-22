@@ -29,6 +29,14 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
     try {
       isLoading.value = true
       error.value = null
+      
+      // Check if storage is unlocked before attempting to load
+      if (!secureStorage.isUnlocked()) {
+        console.log('[DEBUG] loadHoldings - storage is locked, skipping load')
+        holdings.value = []
+        return
+      }
+      
       holdings.value = await secureStorage.getHoldings()
     } catch (err) {
       error.value = 'ポートフォリオの読み込みに失敗しました'
@@ -42,6 +50,14 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
     try {
       isLoading.value = true
       error.value = null
+      
+      // Check if storage is unlocked before attempting to load
+      if (!secureStorage.isUnlocked()) {
+        console.log('[DEBUG] loadAggregatedHoldings - storage is locked, skipping load')
+        aggregatedHoldings.value = new Map()
+        return
+      }
+      
       aggregatedHoldings.value = await secureStorage.getAggregatedHoldings()
     } catch (err) {
       error.value = 'ポートフォリオの読み込みに失敗しました'

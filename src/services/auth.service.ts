@@ -178,10 +178,13 @@ export class AuthService {
   }
   
   async logout(): Promise<void> {
+    console.log('[DEBUG] authService.logout() called - Stack trace:')
+    console.trace()
     this.clearTimers()
     secureStorage.clearEncryptionKey()
     
     const authState = await secureStorage.getAuthState()
+    console.log('[DEBUG] logout() - setting isAuthenticated to false')
     await secureStorage.setAuthState({
       ...authState,
       isAuthenticated: false
@@ -231,8 +234,11 @@ export class AuthService {
       }
       
       // Derive encryption key and unlock storage
-      const { key } = await CryptoService.deriveKey(password)
+      const saltBuffer = new Uint8Array(this.base64ToArrayBuffer(authState.salt))
+      const { key } = await CryptoService.deriveKey(password, saltBuffer)
       secureStorage.setEncryptionKey(key)
+      
+      console.log('[DEBUG] unlockWithPassword - encryption key set, storage unlocked:', secureStorage.isUnlocked())
       
       return { success: true }
     } catch (error) {

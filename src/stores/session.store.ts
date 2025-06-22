@@ -28,6 +28,14 @@ export const useSessionStore = defineStore('session', () => {
       isAuthenticated.value = await authService.isAuthenticated()
       console.log('[DEBUG] Session initialize - isAuthenticated:', isAuthenticated.value)
       if (isAuthenticated.value) {
+        // Check if encryption key is missing (page refresh case)
+        const { secureStorage } = await import('@/services/storage.service')
+        if (!secureStorage.isUnlocked()) {
+          console.log('[DEBUG] Authentication exists but storage is locked - showing unlock prompt')
+          showUnlockPrompt.value = true
+        } else {
+          console.log('[DEBUG] Storage is already unlocked')
+        }
         // Temporarily disable for debugging
         // setupActivityListeners()
         // startWarningCountdown()
@@ -45,6 +53,8 @@ export const useSessionStore = defineStore('session', () => {
   }
   
   async function logout() {
+    console.log('[DEBUG] sessionStore.logout() called - Stack trace:')
+    console.trace()
     clearWarningTimer()
     removeActivityListeners()
     document.removeEventListener('visibilitychange', handleVisibilityChange)
@@ -118,13 +128,14 @@ export const useSessionStore = defineStore('session', () => {
     })
   }
   
-  authService.onWarning(() => {
-    showWarning.value = true
-  })
+  // TEMPORARILY DISABLED FOR DEBUGGING
+  // authService.onWarning(() => {
+  //   showWarning.value = true
+  // })
   
-  authService.onTimeout(() => {
-    logout()
-  })
+  // authService.onTimeout(() => {
+  //   logout()
+  // })
   
   // Page Visibility API でタブの状態変化を監視
   function handleVisibilityChange() {
@@ -175,8 +186,88 @@ export const useSessionStore = defineStore('session', () => {
     })
   }
   
-  function handleUnlockSuccess() {
+  async function handleUnlockSuccess() {
+    console.log('[DEBUG] handleUnlockSuccess - refreshing stores')
+    
+    // Refresh all stores after unlock BEFORE closing prompt
+    try {
+      const { secureStorage } = await import('@/services/storage.service')
+      console.log('[DEBUG] Before store refresh - storage unlocked:', secureStorage.isUnlocked())
+      
+      // Test basic database access with detailed error info
+      try {
+        console.log('[DEBUG] Testing database access...')
+        const testHoldings = await secureStorage.getHoldings()
+        console.log('[DEBUG] Direct getHoldings test successful, count:', testHoldings.length)
+      } catch (testError) {
+        console.error('[DEBUG] Direct getHoldings test failed:', testError)
+        console.error('[DEBUG] Error name:', testError.name)
+        console.error('[DEBUG] Error message:', testError.message)
+        console.error('[DEBUG] Error stack:', testError.stack)
+        
+        // Try alternative database access
+        try {
+          const { dbV2 } = await import('@/services/db-v2')
+          const rawHoldings = await dbV2.holdings.toArray()
+          console.log('[DEBUG] Raw database access successful, count:', rawHoldings.length)
+        } catch (rawError) {
+          console.error('[DEBUG] Raw database access also failed:', rawError)
+        }
+      }
+      
+      const { useTokensStore } = await import('@/stores/useTokens')
+      const { useHoldingsStoreV2 } = await import('@/stores/useHoldingsV2')
+      const { useLocationsStore } = await import('@/stores/useLocations')
+      
+      const tokensStore = useTokensStore()
+      const holdingsStore = useHoldingsStoreV2()
+      const locationsStore = useLocationsStore()
+      
+      console.log('[DEBUG] Starting store refresh...')
+      
+      // Refresh stores individually with error handling
+      try {
+        await tokensStore.loadTokens()
+        console.log('[DEBUG] Tokens loaded successfully')
+      } catch (error) {
+        console.error('[DEBUG] Failed to load tokens:', error)
+      }
+      
+      try {
+        await holdingsStore.loadHoldings()
+        console.log('[DEBUG] Holdings loaded successfully')
+      } catch (error) {
+        console.error('[DEBUG] Failed to load holdings:', error)
+      }
+      
+      try {
+        await holdingsStore.loadAggregatedHoldings()
+        console.log('[DEBUG] Aggregated holdings loaded successfully')
+      } catch (error) {
+        console.error('[DEBUG] Failed to load aggregated holdings:', error)
+      }
+      
+      try {
+        await locationsStore.loadLocations()
+        console.log('[DEBUG] Locations loaded successfully')
+      } catch (error) {
+        console.error('[DEBUG] Failed to load locations:', error)
+      }
+      
+      console.log('[DEBUG] All stores refresh completed')
+    } catch (error) {
+      console.error('[DEBUG] Error refreshing stores after unlock:', error)
+    }
+    
+    // Wait a bit for all reactive updates to complete
+    await new Promise(resolve => setTimeout(resolve, 100))
+    
+    // Close unlock prompt AFTER stores are refreshed
     showUnlockPrompt.value = false
+    
+    // Trigger a final reactive update
+    await new Promise(resolve => setTimeout(resolve, 50))
+    
     ;(window as any)._unlockHandlers?.handleUnlock()
   }
   

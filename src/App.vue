@@ -17,10 +17,10 @@
       <button @click="showDebugInfo = false" class="mt-2 px-2 py-1 bg-red-200 dark:bg-red-800 rounded text-xs">Close</button>
     </div>
 
-    <!-- Login Screen -->
-    <LoginForm v-if="sessionStore.isLocked" @login-success="handleLoginSuccess" />
+    <!-- Login Screen (first time login or logged out) -->
+    <LoginForm v-if="!sessionStore.isAuthenticated" @login-success="handleLoginSuccess" />
     
-    <!-- Main App -->
+    <!-- Main App (authenticated) -->
     <div v-else>
       <!-- Session Banner -->
       <SessionBanner 
@@ -215,6 +215,11 @@ onMounted(async () => {
   debug += `After sessionStore.initialize():\n`
   debug += `sessionStore.isAuthenticated: ${sessionStore.isAuthenticated}\n`
   debug += `sessionStore.isLocked: ${sessionStore.isLocked}\n`
+  
+  // Check storage lock state
+  const { secureStorage } = await import('@/services/storage.service')
+  debug += `secureStorage.isUnlocked(): ${secureStorage.isUnlocked()}\n`
+  debug += `sessionStore.showUnlockPrompt: ${sessionStore.showUnlockPrompt}\n`
   
   debugInfo.value = debug
 })

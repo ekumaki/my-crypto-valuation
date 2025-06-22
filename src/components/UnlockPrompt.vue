@@ -81,12 +81,16 @@ async function handleUnlock() {
   error.value = ''
 
   try {
+    console.log('[DEBUG] UnlockPrompt - attempting unlock with password')
     const result = await authService.unlockWithPassword(password.value)
+    console.log('[DEBUG] UnlockPrompt - unlock result:', result)
     
     if (result.success) {
+      console.log('[DEBUG] UnlockPrompt - unlock successful, emitting unlock event')
       password.value = ''
       emit('unlock')
     } else {
+      console.log('[DEBUG] UnlockPrompt - unlock failed:', result.error)
       error.value = result.error || 'パスワードが正しくありません'
     }
   } catch (err) {

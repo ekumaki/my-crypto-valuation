@@ -194,6 +194,8 @@ class SyncService {
 
       // Download and decrypt cloud data
       const cloudData = await this.downloadFromCloud(backupFile.id)
+      console.log('[DEBUG] Cloud data downloaded:', cloudData)
+      console.log('[DEBUG] Cloud portfolioData:', cloudData.portfolioData)
       
       // Check for conflicts
       if (localData.holdings.length > 0 && cloudData.portfolioData.holdings.length > 0) {
@@ -330,6 +332,11 @@ class SyncService {
     const { secureStorage } = await import('@/services/storage.service')
     
     console.log('updateLocalData called with:', data)
+    console.log('[DEBUG] Detailed sync data contents:')
+    console.log('  Holdings count:', data.holdings?.length || 0)
+    console.log('  Holdings data:', data.holdings)
+    console.log('  Tokens count:', data.tokens?.length || 0)
+    console.log('  Locations count:', data.locations?.length || 0)
     console.log('secureStorage isUnlocked:', secureStorage.isUnlocked())
     
     // Clear existing data
