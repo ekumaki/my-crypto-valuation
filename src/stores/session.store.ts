@@ -2,6 +2,9 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { authService } from '@/services/auth.service'
 
+// ローカルストレージのキー
+const SESSION_START_TIME_KEY = 'session_start_time'
+
 export const useSessionStore = defineStore('session', () => {
   const isAuthenticated = ref(false)
   const isLoading = ref(false)
@@ -22,12 +25,63 @@ export const useSessionStore = defineStore('session', () => {
     return `${minutes}:${seconds.toString().padStart(2, '0')}`
   })
   
+  // セッション開始時間をローカルストレージに保存
+  function saveSessionStartTime(time: number) {
+    try {
+      localStorage.setItem(SESSION_START_TIME_KEY, time.toString())
+    } catch (error) {
+      console.error('Failed to save session start time:', error)
+    }
+  }
+
+  // セッション開始時間をローカルストレージから復元
+  function loadSessionStartTime(): number {
+    try {
+      const saved = localStorage.getItem(SESSION_START_TIME_KEY)
+      return saved ? parseInt(saved, 10) : 0
+    } catch (error) {
+      console.error('Failed to load session start time:', error)
+      return 0
+    }
+  }
+
+  // セッション開始時間をローカルストレージから削除
+  function clearSessionStartTime() {
+    try {
+      localStorage.removeItem(SESSION_START_TIME_KEY)
+    } catch (error) {
+      console.error('Failed to clear session start time:', error)
+    }
+  }
+  
   async function initialize() {
     isLoading.value = true
     try {
       isAuthenticated.value = await authService.isAuthenticated()
       console.log('[DEBUG] Session initialize - isAuthenticated:', isAuthenticated.value)
       if (isAuthenticated.value) {
+        // セッション開始時間を復元
+        const savedStartTime = loadSessionStartTime()
+        if (savedStartTime > 0) {
+          sessionStartTime.value = savedStartTime
+          console.log('[DEBUG] Restored session start time:', new Date(savedStartTime))
+          
+          // 復元した時間を基に残り時間を計算
+          const totalSessionTime = 30 * 60 * 1000 // 30 minutes
+          const elapsedTime = Date.now() - savedStartTime
+          const newRemainingTime = Math.max(0, totalSessionTime - elapsedTime)
+          remainingTime.value = newRemainingTime
+          
+          console.log('[DEBUG] Calculated remaining time on restore:', newRemainingTime / 1000, 'seconds')
+          
+          // セッションが期限切れの場合はログアウト
+          if (newRemainingTime <= 0) {
+            console.log('[DEBUG] Session expired during restore, logging out')
+            await logout()
+            return
+          }
+        }
+        
         // Check if encryption key is missing (page refresh case)
         const { secureStorage } = await import('@/services/storage.service')
         if (!secureStorage.isUnlocked()) {
@@ -36,10 +90,19 @@ export const useSessionStore = defineStore('session', () => {
         } else {
           console.log('[DEBUG] Storage is already unlocked')
         }
-        // Temporarily disable for debugging
-        // setupActivityListeners()
-        // startWarningCountdown()
-        console.log('[DEBUG] Session initialized successfully, but timers disabled for debugging')
+        
+        // セッションタイマーを開始
+        // 復元された時間がない場合でも、認証済みの場合はタイマーを開始
+        if (sessionStartTime.value === 0) {
+          // セッション開始時間が保存されていない場合は新しく設定
+          sessionStartTime.value = Date.now()
+          saveSessionStartTime(sessionStartTime.value)
+          console.log('[DEBUG] Set new session start time for authenticated user:', new Date(sessionStartTime.value))
+        }
+        startWarningCountdown()
+        
+        setupActivityListeners()
+        console.log('[DEBUG] Session initialized successfully')
       }
     } finally {
       isLoading.value = false
@@ -48,6 +111,12 @@ export const useSessionStore = defineStore('session', () => {
   
   async function login() {
     isAuthenticated.value = true
+    
+    // ログイン時にセッション開始時間を設定
+    sessionStartTime.value = Date.now()
+    saveSessionStartTime(sessionStartTime.value)
+    console.log('[DEBUG] login - new session start time:', new Date(sessionStartTime.value))
+    
     setupActivityListeners()
     startWarningCountdown()
   }
@@ -61,27 +130,47 @@ export const useSessionStore = defineStore('session', () => {
     showWarning.value = false
     isAuthenticated.value = false
     sessionStartTime.value = 0
+    clearSessionStartTime() // ローカルストレージからも削除
     await authService.logout()
   }
   
   function extendSession() {
     // 明示的なセッション延長時のみ警告をクリアして時間をリセット
+    console.log('[DEBUG] extendSession called - resetting session timer')
     authService.extendSession()
     showWarning.value = false
+    
+    // セッション延長時は新しい開始時間を設定
+    sessionStartTime.value = Date.now()
+    saveSessionStartTime(sessionStartTime.value)
+    console.log('[DEBUG] extendSession - new session start time:', new Date(sessionStartTime.value))
+    
     startWarningCountdown()
   }
   
   function startWarningCountdown() {
     clearWarningTimer()
     const totalSessionTime = 30 * 60 * 1000 // 30 minutes
-    sessionStartTime.value = Date.now()
-    remainingTime.value = totalSessionTime
+    
+    // セッション開始時間が設定されていない場合は現在時刻を設定
+    if (sessionStartTime.value === 0) {
+      sessionStartTime.value = Date.now()
+      saveSessionStartTime(sessionStartTime.value)
+      console.log('[DEBUG] Set new session start time:', new Date(sessionStartTime.value))
+    } else {
+      // 既存のセッション開始時間を使用（復元後の場合）
+      console.log('[DEBUG] Using existing session start time:', new Date(sessionStartTime.value))
+    }
+    
+    remainingTime.value = Math.max(0, totalSessionTime - (Date.now() - sessionStartTime.value))
+    console.log('[DEBUG] startWarningCountdown - initial remainingTime:', remainingTime.value / 1000, 'seconds')
     
     const updateCountdown = () => {
       // 実際の経過時間から残り時間を計算
       const elapsedTime = Date.now() - sessionStartTime.value
       const newRemainingTime = Math.max(0, totalSessionTime - elapsedTime)
       remainingTime.value = newRemainingTime
+      console.log('[DEBUG] updateCountdown - remainingTime:', remainingTime.value / 1000, 'seconds')
       
       if (remainingTime.value <= 5 * 60 * 1000 && !showWarning.value) {
         showWarning.value = true
@@ -201,9 +290,9 @@ export const useSessionStore = defineStore('session', () => {
         console.log('[DEBUG] Direct getHoldings test successful, count:', testHoldings.length)
       } catch (testError) {
         console.error('[DEBUG] Direct getHoldings test failed:', testError)
-        console.error('[DEBUG] Error name:', testError.name)
-        console.error('[DEBUG] Error message:', testError.message)
-        console.error('[DEBUG] Error stack:', testError.stack)
+        console.error('[DEBUG] Error name:', (testError as Error).name)
+        console.error('[DEBUG] Error message:', (testError as Error).message)
+        console.error('[DEBUG] Error stack:', (testError as Error).stack)
         
         // Try alternative database access
         try {
@@ -267,6 +356,12 @@ export const useSessionStore = defineStore('session', () => {
     
     // Trigger a final reactive update
     await new Promise(resolve => setTimeout(resolve, 50))
+    
+    // アンロック成功後にセッションタイマーを再開
+    if (sessionStartTime.value > 0) {
+      console.log('[DEBUG] Restarting session timer after unlock')
+      startWarningCountdown()
+    }
     
     ;(window as any)._unlockHandlers?.handleUnlock()
   }

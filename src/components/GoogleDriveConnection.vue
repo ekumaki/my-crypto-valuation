@@ -146,17 +146,7 @@
 
     <!-- Action Buttons -->
     <div class="space-y-3">
-      <!-- Debug Info -->
-      <div class="mb-3 p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-md text-xs">
-        <p>Debug: isAuthenticated = {{ authStatus.isAuthenticated }}</p>
-        <p>Debug: isLoading = {{ authStatus.isLoading }}</p>
-        <p>Debug: Client ID = {{ clientId ? 'Set' : 'Not Set' }}</p>
-        <p>Debug: isInitialized = {{ googleAuthService.isInitialized.value }}</p>
-        <p>Debug: Error = {{ authStatus.error || 'None' }}</p>
-        <p>Debug: Sync Enabled = {{ syncStatus.isEnabled }}</p>
-        <p>Debug: Cloud File Exists = {{ syncStatus.cloudFileExists }}</p>
-        <p>Debug: Sync State = {{ JSON.stringify(syncStatus) }}</p>
-      </div>
+
 
       <!-- Google Sign In -->
       <button
@@ -269,9 +259,7 @@ const syncStatus = computed(() => syncService.status.value)
 // Environment variables
 const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
 
-// Debug logging
 onMounted(async () => {
-  console.log('GoogleDriveConnection mounted')
   console.log('Auth status:', authStatus.value)
   console.log('Sync status:', syncStatus.value)
   console.log('Client ID:', clientId)
