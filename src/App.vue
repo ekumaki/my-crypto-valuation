@@ -12,6 +12,7 @@
     
 
 
+
     <!-- Login Screen (first time login or logged out) -->
     <LoginForm v-if="!sessionStore.isAuthenticated" @login-success="handleLoginSuccess" />
     
@@ -129,7 +130,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import Toast from '@/components/Toast.vue'
 import LoginForm from '@/components/LoginForm.vue'
@@ -146,6 +147,17 @@ const isDark = ref(document.documentElement.classList.contains('dark'))
 const showPasswordSettings = ref(false)
 const showCloudSync = ref(false)
 
+// Watch for authentication state changes
+watch(() => sessionStore.isAuthenticated, (newValue, oldValue) => {
+  console.log('[DEBUG] sessionStore.isAuthenticated changed:', oldValue, '->', newValue)
+  
+  // If authentication state changed from false to true, navigate to summary
+  if (oldValue === false && newValue === true) {
+    console.log('[DEBUG] Authentication state changed to true, navigating to /summary')
+    router.push('/summary')
+  }
+})
+
 
 function toggleDarkMode() {
   isDark.value = !isDark.value
@@ -159,8 +171,11 @@ function toggleDarkMode() {
 }
 
 function handleLoginSuccess() {
-  sessionStore.login()
+  // Session is already started in LoginForm, just navigate to summary
+  console.log('[DEBUG] handleLoginSuccess called - sessionStore.isAuthenticated:', sessionStore.isAuthenticated)
+  console.log('[DEBUG] About to navigate to /summary')
   router.push('/summary')
+  console.log('[DEBUG] Navigation to /summary completed')
 }
 
 function handlePasswordChangeSuccess() {
@@ -184,7 +199,10 @@ onMounted(async () => {
     }
   }
   
-  // Initialize session
-  await sessionStore.initialize()
+  // Initialize session - but don't wait for it to complete
+  // This prevents blocking the UI while allowing the session to be restored
+  sessionStore.initialize().then(() => {
+    console.log('[DEBUG] App.vue sessionStore.initialize completed - sessionStore.isAuthenticated:', sessionStore.isAuthenticated)
+  })
 })
 </script>

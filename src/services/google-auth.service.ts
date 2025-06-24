@@ -308,6 +308,73 @@ class GoogleAuthService {
     this._error.value = null
     await this.initializeGoogleAPI()
   }
+
+  // 統合認証フロー: 認証とファイルチェックを並列実行
+  async authenticateAndInitialize(): Promise<'new_user' | 'existing_user'> {
+    try {
+      this._isLoading.value = true
+      this._error.value = null
+
+      if (!this._isInitialized.value) {
+        await this.waitForInitialization()
+      }
+
+      if (!this.authInstance) {
+        throw new Error('Google Auth not initialized')
+      }
+
+      // OAuth認証を開始
+      return new Promise((resolve, reject) => {
+        // コールバックを一時的に変更して認証完了を検知
+        const tempCallback = async (response: any) => {
+          try {
+            // 元のトークン処理を実行
+            this.handleTokenResponse(response)
+            
+            if (response.access_token) {
+              // 認証成功後、ファイル存在チェックを実行
+              const { googleDriveApiService } = await import('./google-drive-api.service')
+              const existingFile = await googleDriveApiService.findBackupFile()
+              
+              const userType = existingFile && existingFile.size && parseInt(existingFile.size.toString()) > 0 
+                ? 'existing_user' 
+                : 'new_user'
+                
+              resolve(userType)
+            } else {
+              reject(new Error('認証に失敗しました'))
+            }
+          } catch (error) {
+            reject(error)
+          }
+        }
+        
+        // 一時的にコールバックを設定
+        this.authInstance.callback = tempCallback
+        this.authInstance.requestAccessToken()
+      })
+
+    } catch (error: any) {
+      console.error('統合認証に失敗:', error)
+      this._error.value = this.getAuthErrorMessage(error)
+      throw error
+    } finally {
+      this._isLoading.value = false
+    }
+  }
+
+  private getAuthErrorMessage(error: any): string {
+    if (error.error === 'access_denied') {
+      return 'Google Drive との連携が必要です\nデータの同期にはファイル保存権限が必要です'
+    }
+    if (error.error === 'network_error' || error.message?.includes('network')) {
+      return 'ネットワークエラーが発生しました\n接続を確認して再試行してください'
+    }
+    if (error.message?.includes('Client ID')) {
+      return 'Google Client ID が設定されていません\n.envファイルを確認してください'
+    }
+    return '認証エラーが発生しました'
+  }
 }
 
 // Create and export singleton instance

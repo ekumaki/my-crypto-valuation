@@ -192,9 +192,41 @@ export class AuthService {
   }
   
   async resetAndClearData(): Promise<void> {
-    this.clearTimers()
-    await secureStorage.clearAuthState()
-    secureStorage.clearEncryptionKey()
+    try {
+      this.clearTimers()
+      
+      // Force clear all data regardless of lock state
+      await secureStorage.forceReset()
+      secureStorage.clearEncryptionKey()
+      
+      // Clear all localStorage data
+      localStorage.clear()
+      
+      // Clear IndexedDB databases
+      try {
+        await this.clearIndexedDB('CryptoPortfolioDB')
+        await this.clearIndexedDB('CryptoPortfolioDBV2')
+      } catch (error) {
+        console.warn('Failed to clear IndexedDB:', error)
+      }
+      
+      console.log('All data cleared successfully')
+    } catch (error) {
+      console.error('Failed to reset data:', error)
+      throw error
+    }
+  }
+
+  private clearIndexedDB(dbName: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const deleteReq = indexedDB.deleteDatabase(dbName)
+      deleteReq.onsuccess = () => resolve()
+      deleteReq.onerror = () => reject(deleteReq.error)
+      deleteReq.onblocked = () => {
+        console.warn(`IndexedDB ${dbName} deletion blocked`)
+        resolve() // Continue anyway
+      }
+    })
   }
   
   async isAuthenticated(): Promise<boolean> {
@@ -211,8 +243,10 @@ export class AuthService {
   async unlockWithPassword(password: string): Promise<LoginResult> {
     try {
       const authState = await secureStorage.getAuthState()
+      console.log('[DEBUG] unlockWithPassword - authState:', authState)
       
-      if (!authState.isAuthenticated || !authState.passwordHash || !authState.salt) {
+      // For existing users, we only need passwordHash and salt, not isAuthenticated
+      if (!authState.passwordHash || !authState.salt) {
         return {
           success: false,
           error: '認証情報が見つかりません'
@@ -237,6 +271,12 @@ export class AuthService {
       const saltBuffer = new Uint8Array(this.base64ToArrayBuffer(authState.salt))
       const { key } = await CryptoService.deriveKey(password, saltBuffer)
       secureStorage.setEncryptionKey(key)
+      
+      // Update authentication state to true after successful unlock
+      await secureStorage.setAuthState({
+        ...authState,
+        isAuthenticated: true
+      })
       
       console.log('[DEBUG] unlockWithPassword - encryption key set, storage unlocked:', secureStorage.isUnlocked())
       

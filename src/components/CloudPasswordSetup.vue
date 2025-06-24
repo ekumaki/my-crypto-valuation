@@ -305,7 +305,7 @@ async function handleSubmit() {
     emit('setupComplete', password.value)
   } catch (error) {
     console.error('Password setup failed:', error)
-    // Handle error
+    // Handle error display here if needed
   } finally {
     isSubmitting.value = false
   }

@@ -131,7 +131,9 @@ export const dbV2 = new CryptoPortfolioDBV2()
 export const dbServiceV2 = {
   // Location operations
   async getLocations(): Promise<Location[]> {
-    return await dbV2.locations.orderBy('name').toArray()
+    const locations = await dbV2.locations.orderBy('name').toArray()
+    console.log('[DEBUG] dbServiceV2.getLocations - returning', locations.length, 'locations')
+    return locations
   },
 
   async getLocationsByType(type: LocationType): Promise<Location[]> {

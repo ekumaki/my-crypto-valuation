@@ -26,7 +26,7 @@
             <span class="text-sm text-gray-600 dark:text-gray-400">
               {{
                 syncStatus.isSyncing ? '同期中' :
-                syncStatus.lastSyncError ? '同期エラー' : 
+                syncStatus.lastSyncError ? `同期エラー: ${syncStatus.lastSyncError}` : 
                 syncStatus.lastSyncTime ? `同期済み (${formatSyncTime(syncStatus.lastSyncTime)})` : '同期準備完了'
               }}
             </span>

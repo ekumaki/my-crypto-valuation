@@ -57,8 +57,13 @@ export const useSessionStore = defineStore('session', () => {
   async function initialize() {
     isLoading.value = true
     try {
-      isAuthenticated.value = await authService.isAuthenticated()
-      console.log('[DEBUG] Session initialize - isAuthenticated:', isAuthenticated.value)
+      // Don't override authentication state if already authenticated
+      if (!isAuthenticated.value) {
+        isAuthenticated.value = await authService.isAuthenticated()
+        console.log('[DEBUG] Session initialize - isAuthenticated:', isAuthenticated.value)
+      } else {
+        console.log('[DEBUG] Session initialize - already authenticated, skipping authService check')
+      }
       if (isAuthenticated.value) {
         // セッション開始時間を復元
         const savedStartTime = loadSessionStartTime()
@@ -109,13 +114,15 @@ export const useSessionStore = defineStore('session', () => {
     }
   }
   
-  async function login() {
+  async function login(authType: string = 'password') {
+    console.log('[DEBUG] sessionStore.login() called - before setting isAuthenticated:', isAuthenticated.value)
     isAuthenticated.value = true
+    console.log('[DEBUG] sessionStore.login() called - after setting isAuthenticated:', isAuthenticated.value)
     
     // ログイン時にセッション開始時間を設定
     sessionStartTime.value = Date.now()
     saveSessionStartTime(sessionStartTime.value)
-    console.log('[DEBUG] login - new session start time:', new Date(sessionStartTime.value))
+    console.log('[DEBUG] login - new session start time:', new Date(sessionStartTime.value), 'auth type:', authType)
     
     setupActivityListeners()
     startWarningCountdown()

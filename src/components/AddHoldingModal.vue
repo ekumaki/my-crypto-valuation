@@ -358,9 +358,30 @@ watch(() => props.holding, (holding) => {
 }, { immediate: true })
 
 onMounted(async () => {
+  console.log('[DEBUG] AddHoldingModal - starting data load')
+  
+  // Check database state before loading
+  const { dbV2 } = await import('@/services/db-v2')
+  const dbLocationCount = await dbV2.locations.count()
+  console.log('[DEBUG] AddHoldingModal - database location count before load:', dbLocationCount)
+  
   await Promise.all([
     tokensStore.loadTokens(),
     locationsStore.loadLocations()
   ])
+  
+  // Check database state after loading
+  const dbLocationCountAfter = await dbV2.locations.count()
+  console.log('[DEBUG] AddHoldingModal - database location count after load:', dbLocationCountAfter)
+  
+  console.log('[DEBUG] AddHoldingModal - data load completed')
+  console.log('[DEBUG] Total locations loaded:', locationsStore.locations.length)
+  console.log('[DEBUG] Domestic CEX:', domesticCEX.value.length)
+  console.log('[DEBUG] Global CEX:', globalCEX.value.length)
+  console.log('[DEBUG] SW Wallets:', swWallets.value.length)
+  console.log('[DEBUG] HW Wallets:', hwWallets.value.length)
+  
+  // Additional debugging: list actual location data
+  console.log('[DEBUG] AddHoldingModal - actual location data:', locationsStore.locations.map(l => ({ id: l.id, name: l.name, type: l.type })))
 })
 </script>

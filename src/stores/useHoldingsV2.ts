@@ -37,10 +37,15 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
         return
       }
       
+      console.log('[DEBUG] loadHoldings - attempting to load holdings from secure storage')
       holdings.value = await secureStorage.getHoldings()
+      console.log('[DEBUG] loadHoldings - successfully loaded', holdings.value.length, 'holdings')
     } catch (err) {
       error.value = 'ポートフォリオの読み込みに失敗しました'
       console.error('Failed to load holdings:', err)
+      console.error('Error name:', err instanceof Error ? err.name : 'Unknown')
+      console.error('Error message:', err instanceof Error ? err.message : err)
+      console.error('Error stack:', err instanceof Error ? err.stack : 'No stack')
     } finally {
       isLoading.value = false
     }
@@ -58,10 +63,15 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
         return
       }
       
+      console.log('[DEBUG] loadAggregatedHoldings - attempting to load aggregated holdings')
       aggregatedHoldings.value = await secureStorage.getAggregatedHoldings()
+      console.log('[DEBUG] loadAggregatedHoldings - successfully loaded', aggregatedHoldings.value.size, 'aggregated holdings')
     } catch (err) {
       error.value = 'ポートフォリオの読み込みに失敗しました'
       console.error('Failed to load aggregated holdings:', err)
+      console.error('Error name:', err instanceof Error ? err.name : 'Unknown')
+      console.error('Error message:', err instanceof Error ? err.message : err)
+      console.error('Error stack:', err instanceof Error ? err.stack : 'No stack')
     } finally {
       isLoading.value = false
     }
@@ -70,15 +80,90 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
   async function addHolding(holding: Omit<Holding, 'id' | 'createdAt' | 'updatedAt'>) {
     try {
       error.value = null
+      console.log('[DEBUG] addHolding - storage unlocked:', secureStorage.isUnlocked())
+      console.log('[DEBUG] addHolding - attempting to add:', holding)
+      
+      if (!secureStorage.isUnlocked()) {
+        console.log('[DEBUG] addHolding - storage is locked, attempting to unlock...')
+        
+        // Check if we're authenticated and can unlock storage
+        const { authService } = await import('@/services/auth.service')
+        const isAuthenticated = await authService.isAuthenticated()
+        console.log('[DEBUG] addHolding - authentication status:', isAuthenticated)
+        
+        if (!isAuthenticated) {
+          throw new Error('Not authenticated - cannot add holding')
+        }
+        
+        // Try to restore encryption key from session
+        try {
+          console.log('[DEBUG] addHolding - attempting to restore encryption key from session...')
+          
+          // Check if we can use the session store to trigger unlock prompt
+          const { useSessionStore } = await import('@/stores/session.store')
+          const sessionStore = useSessionStore()
+          
+          console.log('[DEBUG] addHolding - requesting unlock through session store...')
+          const unlockSuccess = await sessionStore.requestUnlock()
+          
+          if (unlockSuccess && secureStorage.isUnlocked()) {
+            console.log('[DEBUG] addHolding - unlock successful, retrying operation...')
+            // Don't throw error, let the operation continue
+          } else {
+            console.log('[DEBUG] addHolding - unlock failed or cancelled')
+            throw new Error('ストレージのロック解除に失敗しました')
+          }
+        } catch (unlockError) {
+          console.error('[DEBUG] addHolding - failed to unlock storage:', unlockError)
+          throw new Error('ストレージがロックされています。パスワードを再入力してください。')
+        }
+      }
+      
       await secureStorage.addHolding(holding)
+      console.log('[DEBUG] addHolding - successfully added to storage')
+      
       await Promise.all([
         loadHoldings(),
         loadAggregatedHoldings()
       ])
+      console.log('[DEBUG] addHolding - completed reload')
+      
+      // Trigger automatic sync with Google Drive if sync is enabled
+      try {
+        const { syncService } = await import('@/services/sync.service')
+        if (syncService.isEnabled.value) {
+          console.log('[DEBUG] addHolding - triggering automatic sync')
+          // Don't await sync to avoid blocking the UI
+          syncService.performSync().then(result => {
+            if (result.success) {
+              console.log('[DEBUG] addHolding - automatic sync completed successfully')
+            } else {
+              console.warn('[DEBUG] addHolding - automatic sync failed:', result.message)
+              // Show error toast for sync failures
+              if (window.showToast) {
+                window.showToast.warning('同期エラー', `データの自動同期に失敗しました: ${result.message}`)
+              }
+            }
+          }).catch(err => {
+            console.error('[DEBUG] addHolding - automatic sync error:', err)
+            // Show error toast for sync errors
+            if (window.showToast) {
+              window.showToast.error('同期エラー', 'データの自動同期中にエラーが発生しました')
+            }
+          })
+        } else {
+          console.log('[DEBUG] addHolding - sync not enabled, skipping automatic sync')
+        }
+      } catch (syncError) {
+        console.warn('[DEBUG] addHolding - failed to trigger sync:', syncError)
+        // Don't fail the whole operation if sync fails
+      }
+      
       return true
     } catch (err) {
       error.value = '保有データの追加に失敗しました'
       console.error('Failed to add holding:', err)
+      console.error('Error details:', err)
       return false
     }
   }
@@ -91,6 +176,34 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
         loadHoldings(),
         loadAggregatedHoldings()
       ])
+      
+      // Trigger automatic sync with Google Drive if sync is enabled
+      try {
+        const { syncService } = await import('@/services/sync.service')
+        if (syncService.isEnabled.value) {
+          console.log('[DEBUG] updateHolding - triggering automatic sync')
+          syncService.performSync().then(result => {
+            if (result.success) {
+              console.log('[DEBUG] updateHolding - automatic sync completed successfully')
+            } else {
+              console.warn('[DEBUG] updateHolding - automatic sync failed:', result.message)
+              // Show error toast for sync failures
+              if (window.showToast) {
+                window.showToast.warning('同期エラー', `データの自動同期に失敗しました: ${result.message}`)
+              }
+            }
+          }).catch(err => {
+            console.error('[DEBUG] updateHolding - automatic sync error:', err)
+            // Show error toast for sync errors
+            if (window.showToast) {
+              window.showToast.error('同期エラー', 'データの自動同期中にエラーが発生しました')
+            }
+          })
+        }
+      } catch (syncError) {
+        console.warn('[DEBUG] updateHolding - failed to trigger sync:', syncError)
+      }
+      
       return true
     } catch (err) {
       error.value = '保有データの更新に失敗しました'
@@ -107,6 +220,34 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
         loadHoldings(),
         loadAggregatedHoldings()
       ])
+      
+      // Trigger automatic sync with Google Drive if sync is enabled
+      try {
+        const { syncService } = await import('@/services/sync.service')
+        if (syncService.isEnabled.value) {
+          console.log('[DEBUG] deleteHolding - triggering automatic sync')
+          syncService.performSync().then(result => {
+            if (result.success) {
+              console.log('[DEBUG] deleteHolding - automatic sync completed successfully')
+            } else {
+              console.warn('[DEBUG] deleteHolding - automatic sync failed:', result.message)
+              // Show error toast for sync failures
+              if (window.showToast) {
+                window.showToast.warning('同期エラー', `データの自動同期に失敗しました: ${result.message}`)
+              }
+            }
+          }).catch(err => {
+            console.error('[DEBUG] deleteHolding - automatic sync error:', err)
+            // Show error toast for sync errors
+            if (window.showToast) {
+              window.showToast.error('同期エラー', 'データの自動同期中にエラーが発生しました')
+            }
+          })
+        }
+      } catch (syncError) {
+        console.warn('[DEBUG] deleteHolding - failed to trigger sync:', syncError)
+      }
+      
       return true
     } catch (err) {
       error.value = '保有データの削除に失敗しました'

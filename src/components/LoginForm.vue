@@ -11,95 +11,39 @@
           暗号資産ポートフォリオ
         </h2>
         <p class="mt-2 text-center text-sm text-gray-600 dark:text-gray-400">
-          {{ isSetupMode ? 'セキュアなパスワードを設定してください' : 'パスワードを入力してください' }}
+          Google アカウントでログインしてください
         </p>
       </div>
       
-      <form class="mt-8 space-y-6" @submit.prevent="handleSubmit">
-        <div class="space-y-4">
-          <div>
-            <label for="password" class="sr-only">パスワード</label>
-            <div class="relative">
-              <input
-                id="password"
-                name="password"
-                :type="showPassword ? 'text' : 'password'"
-                v-model="password"
-                :placeholder="isSetupMode ? '新しいパスワードを入力' : 'パスワードを入力'"
-                class="relative block w-full px-3 py-3 border border-gray-300 dark:border-gray-600 placeholder-gray-500 dark:placeholder-gray-400 text-gray-900 dark:text-white bg-white dark:bg-gray-800 rounded-lg focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm"
-                :class="{ 'border-red-300 dark:border-red-600': error }"
-                required
-              />
-              <button
-                type="button"
-                @click="showPassword = !showPassword"
-                class="absolute inset-y-0 right-0 pr-3 flex items-center"
-              >
-                <svg v-if="showPassword" class="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029M6.343 6.343A8 8 0 0112 4c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-1.043 1.777M6.343 6.343L19.657 19.657m-12-12l12 12" />
-                </svg>
-                <svg v-else class="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                </svg>
-              </button>
-            </div>
-          </div>
-          
-          <div v-if="isSetupMode && password" class="space-y-2">
-            <div class="text-sm text-gray-600 dark:text-gray-400">パスワード強度:</div>
-            <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-              <div 
-                class="h-2 rounded-full transition-all duration-300"
-                :class="strengthColor"
-                :style="{ width: `${passwordStrength}%` }"
-              ></div>
-            </div>
-            <div class="text-xs" :class="strengthTextColor">{{ strengthText }}</div>
-            
-            <div v-if="passwordValidation && !passwordValidation.isValid" class="space-y-1">
-              <div v-for="error in passwordValidation.errors" :key="error" class="text-xs text-red-600 dark:text-red-400">
-                • {{ error }}
-              </div>
-            </div>
-          </div>
-          
-          <div v-if="isSetupMode">
-            <label for="confirmPassword" class="sr-only">パスワード確認</label>
-            <input
-              id="confirmPassword"
-              name="confirmPassword"
-              type="password"
-              v-model="confirmPassword"
-              placeholder="パスワードを再入力"
-              class="relative block w-full px-3 py-3 border border-gray-300 dark:border-gray-600 placeholder-gray-500 dark:placeholder-gray-400 text-gray-900 dark:text-white bg-white dark:bg-gray-800 rounded-lg focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm"
-              :class="{ 'border-red-300 dark:border-red-600': confirmPassword && password !== confirmPassword }"
-              required
-            />
-            <div v-if="confirmPassword && password !== confirmPassword" class="mt-1 text-xs text-red-600 dark:text-red-400">
-              パスワードが一致しません
-            </div>
-          </div>
-        </div>
-
-        <div v-if="error" class="text-sm text-red-600 dark:text-red-400 text-center">
-          {{ error }}
-        </div>
-
+      <!-- Google認証ボタン -->
+      <div class="mt-8 space-y-6">
         <div>
           <button
-            type="submit"
-            :disabled="isLoading || (isSetupMode && (!passwordValidation?.isValid || password !== confirmPassword))"
-            class="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-lg text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            @click="handleGoogleAuth"
+            :disabled="isLoading"
+            class="group relative w-full flex justify-center items-center py-3 px-4 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             <span v-if="isLoading" class="absolute left-0 inset-y-0 flex items-center pl-3">
-              <div class="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+              <div class="animate-spin rounded-full h-5 w-5 border-b-2 border-gray-400"></div>
             </span>
-            {{ isLoading ? '処理中...' : (isSetupMode ? 'パスワードを設定' : 'ログイン') }}
+            
+            <!-- Google Icon -->
+            <svg v-if="!isLoading" class="w-5 h-5 mr-3" viewBox="0 0 24 24">
+              <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+            </svg>
+            
+            {{ isLoading ? '認証中...' : 'Google Drive と連携' }}
           </button>
         </div>
 
-        <div v-if="!isSetupMode" class="text-center">
+        <div v-if="error" class="text-sm text-red-600 dark:text-red-400 text-center whitespace-pre-line">
+          {{ error }}
+        </div>
+
+        <div class="text-center">
           <button
             type="button"
             @click="showResetConfirm = true"
@@ -108,7 +52,7 @@
             すべてのデータをリセット
           </button>
         </div>
-      </form>
+      </div>
     </div>
     
     <!-- Reset Confirmation Modal -->
@@ -141,104 +85,310 @@
         </div>
       </div>
     </div>
+
+          <!-- Password Setup Modal -->
+      <CloudPasswordSetup
+        v-if="showPasswordSetup"
+        @setupComplete="handlePasswordSetup"
+        @close="handlePasswordSetupClose"
+      />
+  
+      <!-- Password Prompt Modal -->
+      <CloudPasswordPrompt
+        v-if="showPasswordPrompt"
+        @passwordProvided="handlePasswordAuth"
+        @close="handlePasswordPromptClose"
+        @forgotPassword="handleForgotPassword"
+      />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed } from 'vue'
+import { googleAuthService } from '@/services/google-auth.service'
 import { authService } from '@/services/auth.service'
+import CloudPasswordSetup from '@/components/CloudPasswordSetup.vue'
+import CloudPasswordPrompt from '@/components/CloudPasswordPrompt.vue'
+import { syncService } from '@/services/sync.service'
+import { dbServiceV2, dbV2 } from '@/services/db-v2'
 
 const emit = defineEmits<{
   loginSuccess: []
 }>()
 
-const password = ref('')
-const confirmPassword = ref('')
-const showPassword = ref(false)
 const isLoading = ref(false)
 const error = ref('')
-const isSetupMode = ref(false)
 const showResetConfirm = ref(false)
+const showPasswordSetup = ref(false)
+const showPasswordPrompt = ref(false)
 
-const passwordStrength = computed(() => {
-  return authService.getPasswordStrength(password.value)
-})
-
-const passwordValidation = computed(() => {
-  return authService.validatePassword(password.value)
-})
-
-const strengthColor = computed(() => {
-  if (passwordStrength.value < 30) return 'bg-red-500'
-  if (passwordStrength.value < 60) return 'bg-yellow-500'
-  if (passwordStrength.value < 80) return 'bg-blue-500'
-  return 'bg-green-500'
-})
-
-const strengthTextColor = computed(() => {
-  if (passwordStrength.value < 30) return 'text-red-600 dark:text-red-400'
-  if (passwordStrength.value < 60) return 'text-yellow-600 dark:text-yellow-400'
-  if (passwordStrength.value < 80) return 'text-blue-600 dark:text-blue-400'
-  return 'text-green-600 dark:text-green-400'
-})
-
-const strengthText = computed(() => {
-  if (passwordStrength.value < 30) return '弱い'
-  if (passwordStrength.value < 60) return '普通'
-  if (passwordStrength.value < 80) return '強い'
-  return '非常に強い'
-})
-
-async function handleSubmit() {
+async function handleGoogleAuth() {
   if (isLoading.value) return
   
   error.value = ''
   isLoading.value = true
   
   try {
-    let result
-    if (isSetupMode.value) {
-      if (password.value !== confirmPassword.value) {
-        error.value = 'パスワードが一致しません'
-        return
-      }
-      result = await authService.setupPassword(password.value)
-    } else {
-      result = await authService.login(password.value)
-    }
+    // 統合認証フローを実行
+    const userType = await googleAuthService.authenticateAndInitialize()
     
-    if (result.success) {
-      emit('loginSuccess')
+    if (userType === 'existing_user') {
+      // 既存ユーザー: パスワード入力画面を表示
+      showPasswordPrompt.value = true
     } else {
-      error.value = result.error || 'エラーが発生しました'
+      // 新規ユーザー: パスワード設定画面を表示
+      showPasswordSetup.value = true
     }
-  } catch (err) {
-    console.error('Authentication error:', err)
-    error.value = 'システムエラーが発生しました'
+  } catch (err: any) {
+    console.error('Google authentication failed:', err)
+    error.value = googleAuthService.error.value || '認証に失敗しました'
   } finally {
     isLoading.value = false
   }
+}
+
+async function handlePasswordSetup(password: string) {
+  try {
+    isLoading.value = true
+    error.value = ''
+
+    // Enable sync for new user (without trying to read encrypted data)
+    const syncResult = await syncService.enableSyncForNewUser(password)
+    if (!syncResult.success) {
+      throw new Error(syncResult.message)
+    }
+
+    // Initialize the app session with the password for new users
+    await initializeAppSession(password, true)
+    
+    showPasswordSetup.value = false
+    console.log('[DEBUG] Emitting loginSuccess from handlePasswordSetup')
+    emit('loginSuccess')
+  } catch (err) {
+    console.error('Password setup failed:', err)
+    error.value = err instanceof Error ? err.message : 'パスワードの設定に失敗しました'
+  } finally {
+    isLoading.value = false
+  }
+}
+
+async function handlePasswordAuth(password: string) {
+  try {
+    isLoading.value = true
+    error.value = ''
+
+    // Test the cloud password
+    const isValidPassword = await syncService.testCloudPassword(password)
+    if (!isValidPassword) {
+      throw new Error('パスワードが正しくありません')
+    }
+
+    // Initialize the app session with the password for existing users FIRST
+    // This will unlock the storage before we try to sync
+    await initializeAppSession(password, false)
+
+    // Enable sync with the authenticated password AFTER storage is unlocked
+    const syncResult = await syncService.enableSync(password)
+    if (!syncResult.success) {
+      // Check if this is a conflict error
+      if (syncResult.message === '同期競合が検出されました' && syncResult.conflictData) {
+        // Show conflict resolver instead of throwing error
+        showPasswordPrompt.value = false
+        // Store conflict data for potential future use
+        console.log('[DEBUG] Sync conflict detected, conflict data:', syncResult.conflictData)
+        // For now, we'll continue with the login and let the user handle the conflict later
+        // The conflict will be available in the sync service status
+      } else {
+        throw new Error(syncResult.message)
+      }
+    }
+    
+    showPasswordPrompt.value = false
+    console.log('[DEBUG] Emitting loginSuccess from handlePasswordAuth')
+    emit('loginSuccess')
+  } catch (err) {
+    console.error('Password authentication failed:', err)
+    error.value = err instanceof Error ? err.message : 'パスワードの認証に失敗しました'
+  } finally {
+    isLoading.value = false
+  }
+}
+
+async function initializeAppSession(password?: string, isNewUser: boolean = false) {
+  try {
+    // Import required services
+    const { useSessionStore } = await import('@/stores/session.store')
+    const { secureStorage } = await import('@/services/storage.service')
+    const { authService } = await import('@/services/auth.service')
+    const { nextTick } = await import('vue')
+
+    // Get the session store instance
+    const sessionStore = useSessionStore()
+
+    // Set up encryption key based on user type
+    if (password && !secureStorage.isUnlocked()) {
+      if (isNewUser) {
+        console.log('Setting up encryption key for new user')
+        const setupResult = await authService.setupPassword(password)
+        if (!setupResult.success) {
+          throw new Error(setupResult.error || 'パスワード設定に失敗しました')
+        }
+        console.log('[DEBUG] New user password setup completed, storage unlocked:', secureStorage.isUnlocked())
+      } else {
+        console.log('Unlocking storage for existing user')
+        const unlockResult = await authService.unlockWithPassword(password)
+        if (!unlockResult.success) {
+          throw new Error(unlockResult.error || 'パスワードでのロック解除に失敗しました')
+        }
+        console.log('[DEBUG] Existing user unlock completed, storage unlocked:', secureStorage.isUnlocked())
+      }
+    } else if (secureStorage.isUnlocked()) {
+      console.log('[DEBUG] Storage is already unlocked')
+    } else {
+      console.log('[DEBUG] No password provided or other condition not met')
+    }
+
+    // Start session with Google Drive authentication
+    await sessionStore.login('google-drive')
+    
+    // Ensure secure storage is unlocked
+    if (!secureStorage.isUnlocked()) {
+      throw new Error('セキュアストレージのロックが解除されていません')
+    }
+
+    // For new users, ensure database is properly initialized
+    if (isNewUser) {
+      console.log('Initializing database for new user...')
+      console.log('[DEBUG] Storage unlocked status before DB test:', secureStorage.isUnlocked())
+      
+      try {
+        // Clear existing encrypted data for new user to prevent key conflicts
+        console.log('[DEBUG] Clearing existing encrypted data for new user...')
+        await secureStorage.clearAllDataForNewUser()
+        console.log('[DEBUG] Existing data cleared successfully')
+        
+        // Test basic database connectivity
+        console.log('[DEBUG] Testing basic database connectivity...')
+        // Test database connectivity by accessing tables
+        console.log('[DEBUG] Database opened successfully')
+        
+        // Check table counts
+        const locationCount = await dbV2.locations.count()
+        const holdingCount = await dbV2.holdings.count()
+        console.log('[DEBUG] Database table counts - locations:', locationCount, 'holdings:', holdingCount)
+        
+        // Test data access with new encryption key
+        const testHoldings = await secureStorage.getHoldings()
+        console.log('[DEBUG] Successfully accessed holdings with new key, count:', testHoldings.length)
+        
+      } catch (error) {
+        console.log('Database initialization failed:', error)
+        console.log('Error name:', error.name)
+        console.log('Error message:', error.message)
+        console.log('Error stack:', error.stack)
+        
+        // Try to close and reopen database
+        try {
+          console.log('[DEBUG] Attempting to close and reopen database...')
+          await dbV2.close()
+          await dbV2.open()
+          console.log('[DEBUG] Database reopened successfully')
+          
+          // Clear all data after reopening
+          await secureStorage.clearAllDataForNewUser()
+          const testHoldings = await secureStorage.getHoldings()
+          console.log('[DEBUG] Data cleared and tested successfully')
+          
+        } catch (reopenError) {
+          console.log('Database reopen failed:', reopenError)
+          
+          // Try clearing data as last resort
+          try {
+            await secureStorage.clearAllDataForNewUser()
+            console.log('Database clear completed')
+            const testHoldings = await secureStorage.getHoldings()
+            console.log('[DEBUG] Clear completed successfully')
+            
+          } catch (clearError) {
+            console.log('Database clear failed:', clearError)
+          }
+        }
+      }
+    }
+
+    console.log('App session initialized successfully')
+    console.log('[DEBUG] sessionStore.isAuthenticated after login:', sessionStore.isAuthenticated)
+    console.log('[DEBUG] About to emit loginSuccess')
+    
+    // Ensure Vue reactivity system has processed the changes
+    await nextTick()
+  } catch (err) {
+    console.error('Failed to initialize app session:', err)
+    throw new Error('アプリセッションの初期化に失敗しました')
+  }
+}
+
+function handlePasswordSetupClose() {
+  showPasswordSetup.value = false
+  error.value = ''
+  // Allow user to retry Google authentication if needed
+}
+
+function handlePasswordPromptClose() {
+  showPasswordPrompt.value = false
+  error.value = ''
+  // Allow user to retry Google authentication if needed
+}
+
+function handleForgotPassword() {
+  showPasswordPrompt.value = false
+  showPasswordSetup.value = true
+  // Switch to password setup for resetting cloud password
 }
 
 async function handleReset() {
-  isLoading.value = true
-  showResetConfirm.value = false
-  
   try {
-    await authService.resetAndClearData()
-    isSetupMode.value = true
-    password.value = ''
-    confirmPassword.value = ''
+    // Google認証状態をクリア
+    try {
+      await googleAuthService.signOut()
+    } catch (error) {
+      console.warn('Google sign out failed:', error)
+    }
+    
+    // ローカルストレージを完全クリア
+    localStorage.clear()
+    sessionStorage.clear()
+    
+    // IndexedDBを削除
+    try {
+      await deleteDatabase('CryptoPortfolioDB')
+      await deleteDatabase('CryptoPortfolioDBV2')
+    } catch (error) {
+      console.warn('IndexedDB deletion failed:', error)
+    }
+    
+    showResetConfirm.value = false
     error.value = ''
-  } catch (err) {
-    console.error('Reset error:', err)
+    
+    console.log('Reset completed successfully')
+    
+    // ページをリロードして初期状態に戻す
+    window.location.reload()
+  } catch (error: any) {
+    console.error('Reset failed:', error)
     error.value = 'リセットに失敗しました'
-  } finally {
-    isLoading.value = false
   }
 }
 
-onMounted(async () => {
-  isSetupMode.value = await authService.isFirstTimeSetup()
-})
+function deleteDatabase(dbName: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const deleteReq = indexedDB.deleteDatabase(dbName)
+    deleteReq.onsuccess = () => resolve()
+    deleteReq.onerror = () => reject(deleteReq.error)
+    deleteReq.onblocked = () => {
+      console.warn(`IndexedDB ${dbName} deletion blocked`)
+      resolve() // Continue anyway
+    }
+  })
+}
 </script>

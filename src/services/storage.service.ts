@@ -96,7 +96,12 @@ export class SecureStorageService {
     // Ensure token exists in tokens table
     await dbServiceV2.ensureTokenExists(holding.symbol)
     
-    return await dbV2.table('holdings').add(encryptedHolding as any)
+    await dbV2.table('holdings').add(encryptedHolding as any)
+    
+    // Update last data modified timestamp for sync
+    localStorage.setItem('lastDataModified', Date.now().toString())
+    
+    return newHolding.id
   }
   
   async updateHolding(id: string, updates: Partial<Omit<Holding, 'id' | 'createdAt'>>): Promise<number> {
@@ -121,7 +126,12 @@ export class SecureStorageService {
       encryptedUpdates.symbol = updates.symbol
     }
     
-    return await dbV2.table('holdings').update(id, encryptedUpdates)
+    const result = await dbV2.table('holdings').update(id, encryptedUpdates)
+    
+    // Update last data modified timestamp for sync
+    localStorage.setItem('lastDataModified', Date.now().toString())
+    
+    return result
   }
   
   async deleteHolding(id: string): Promise<void> {
@@ -130,6 +140,9 @@ export class SecureStorageService {
     }
     
     await dbV2.table('holdings').delete(id)
+    
+    // Update last data modified timestamp for sync
+    localStorage.setItem('lastDataModified', Date.now().toString())
   }
   
   async getHoldings(): Promise<Holding[]> {
@@ -137,17 +150,31 @@ export class SecureStorageService {
       throw new Error('Storage is locked')
     }
     
+    console.log('[DEBUG] getHoldings - fetching from database...')
     const encryptedHoldings = await dbV2.table('holdings').orderBy('updatedAt').reverse().toArray()
+    console.log('[DEBUG] getHoldings - fetched', encryptedHoldings.length, 'raw holdings from database')
     
     const holdings: Holding[] = []
-    for (const encrypted of encryptedHoldings) {
-      if (encrypted.isEncrypted) {
-        holdings.push(await this.decryptHolding(encrypted as EncryptedHolding))
-      } else {
-        holdings.push(encrypted as Holding)
+    for (let i = 0; i < encryptedHoldings.length; i++) {
+      const encrypted = encryptedHoldings[i]
+      console.log('[DEBUG] getHoldings - processing holding', i, 'isEncrypted:', encrypted.isEncrypted)
+      
+      try {
+        if (encrypted.isEncrypted) {
+          const decrypted = await this.decryptHolding(encrypted as EncryptedHolding)
+          holdings.push(decrypted)
+          console.log('[DEBUG] getHoldings - successfully decrypted holding', i)
+        } else {
+          holdings.push(encrypted as Holding)
+          console.log('[DEBUG] getHoldings - added unencrypted holding', i)
+        }
+      } catch (decryptError) {
+        console.error('[DEBUG] getHoldings - failed to decrypt holding', i, ':', decryptError)
+        throw decryptError
       }
     }
     
+    console.log('[DEBUG] getHoldings - returning', holdings.length, 'processed holdings')
     return holdings
   }
   
@@ -256,6 +283,90 @@ export class SecureStorageService {
     await dbServiceV2.clearAllData()
   }
   
+  async clearAllDataForNewUser(): Promise<void> {
+    // Clear only encrypted data for new user without checking unlock state
+    // This is needed to remove old encrypted data that was encrypted with different keys
+    // Keep locations and tokens data intact
+    console.log('[DEBUG] clearAllDataForNewUser - clearing encrypted holdings data...')
+    await dbV2.holdings.clear()
+    await dbV2.prices.clear()
+    console.log('[DEBUG] clearAllDataForNewUser - encrypted data cleared successfully')
+    
+    // Ensure initial data exists for new user
+    await this.ensureInitialDataExists()
+  }
+
+  async ensureInitialDataExists(): Promise<void> {
+    console.log('[DEBUG] ensureInitialDataExists - checking if initial data exists...')
+    
+    // Check if locations exist
+    const locationCount = await dbV2.locations.count()
+    console.log('[DEBUG] ensureInitialDataExists - location count:', locationCount)
+    
+    if (locationCount === 0) {
+      console.log('[DEBUG] ensureInitialDataExists - populating locations...')
+      const presetLocations = [
+        // Domestic CEX
+        { id: 'bitflyer', name: 'bitFlyer', type: 'domestic_cex' as const, isCustom: false },
+        { id: 'coincheck', name: 'Coincheck', type: 'domestic_cex' as const, isCustom: false },
+        { id: 'bitbank', name: 'bitbank', type: 'domestic_cex' as const, isCustom: false },
+        { id: 'gmo-coin', name: 'GMO Coin', type: 'domestic_cex' as const, isCustom: false },
+        { id: 'sbi-vc', name: 'SBI VC Trade', type: 'domestic_cex' as const, isCustom: false },
+        
+        // Global CEX
+        { id: 'binance', name: 'Binance', type: 'global_cex' as const, isCustom: false },
+        { id: 'coinbase', name: 'Coinbase', type: 'global_cex' as const, isCustom: false },
+        { id: 'kraken', name: 'Kraken', type: 'global_cex' as const, isCustom: false },
+        { id: 'bybit', name: 'Bybit', type: 'global_cex' as const, isCustom: false },
+        { id: 'okx', name: 'OKX', type: 'global_cex' as const, isCustom: false },
+        
+        // Software Wallets
+        { id: 'metamask', name: 'MetaMask', type: 'sw_wallet' as const, isCustom: false },
+        { id: 'trust-wallet', name: 'Trust Wallet', type: 'sw_wallet' as const, isCustom: false },
+        { id: 'phantom', name: 'Phantom', type: 'sw_wallet' as const, isCustom: false },
+        { id: 'keplr', name: 'Keplr', type: 'sw_wallet' as const, isCustom: false },
+        { id: 'backpack', name: 'Backpack', type: 'sw_wallet' as const, isCustom: false },
+        
+        // Hardware Wallets
+        { id: 'ledger', name: 'Ledger', type: 'hw_wallet' as const, isCustom: false },
+        { id: 'trezor', name: 'Trezor', type: 'hw_wallet' as const, isCustom: false }
+      ]
+      
+      await dbV2.locations.bulkAdd(presetLocations)
+      console.log('[DEBUG] ensureInitialDataExists - locations populated')
+    }
+    
+    // Check if tokens exist
+    const tokenCount = await dbV2.tokens.count()
+    console.log('[DEBUG] ensureInitialDataExists - token count:', tokenCount)
+    
+    if (tokenCount === 0) {
+      console.log('[DEBUG] ensureInitialDataExists - populating tokens...')
+      const presetTokens = [
+        { symbol: 'BTC', name: 'Bitcoin', id: 'bitcoin' },
+        { symbol: 'ETH', name: 'Ethereum', id: 'ethereum' },
+        { symbol: 'BNB', name: 'BNB', id: 'binancecoin' },
+        { symbol: 'ADA', name: 'Cardano', id: 'cardano' },
+        { symbol: 'SOL', name: 'Solana', id: 'solana' },
+        { symbol: 'XRP', name: 'XRP', id: 'ripple' },
+        { symbol: 'DOT', name: 'Polkadot', id: 'polkadot' },
+        { symbol: 'DOGE', name: 'Dogecoin', id: 'dogecoin' },
+        { symbol: 'AVAX', name: 'Avalanche', id: 'avalanche-2' },
+        { symbol: 'SHIB', name: 'Shiba Inu', id: 'shiba-inu' },
+        { symbol: 'MATIC', name: 'Polygon', id: 'matic-network' },
+        { symbol: 'LTC', name: 'Litecoin', id: 'litecoin' },
+        { symbol: 'ATOM', name: 'Cosmos', id: 'cosmos' },
+        { symbol: 'LINK', name: 'Chainlink', id: 'chainlink' },
+        { symbol: 'UNI', name: 'Uniswap', id: 'uniswap' }
+      ]
+      
+      await dbV2.tokens.bulkAdd(presetTokens)
+      console.log('[DEBUG] ensureInitialDataExists - tokens populated')
+    }
+    
+    console.log('[DEBUG] ensureInitialDataExists - initial data check completed')
+  }
+  
   async getAuthState(): Promise<AuthState> {
     const authData = localStorage.getItem('crypto-portfolio-auth')
     console.log('[DEBUG] getAuthState - raw localStorage data:', authData)
@@ -281,6 +392,22 @@ export class SecureStorageService {
   async clearAuthState(): Promise<void> {
     localStorage.removeItem('crypto-portfolio-auth')
     await this.clearAllData()
+  }
+
+  async forceReset(): Promise<void> {
+    // Force clear all data regardless of lock state
+    try {
+      // Clear localStorage auth data
+      localStorage.removeItem('crypto-portfolio-auth')
+      
+      // Clear all database data without checking lock state
+      await dbServiceV2.clearAllData()
+      
+      console.log('Force reset completed successfully')
+    } catch (error) {
+      console.error('Force reset failed:', error)
+      // Don't throw - we want to continue with other cleanup
+    }
   }
 }
 

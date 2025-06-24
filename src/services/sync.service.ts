@@ -5,6 +5,18 @@ import { cloudEncryptionService, type EncryptedData, type CloudBackupData } from
 import { GOOGLE_DRIVE_CONFIG, SYNC_CONFIG, ERROR_MESSAGES } from '@/config/google-drive.config'
 import { dbV2 } from '@/services/db-v2'
 
+// Type declaration for Toast notifications
+declare global {
+  interface Window {
+    showToast?: {
+      success: (title: string, message?: string, duration?: number) => string
+      error: (title: string, message?: string, duration?: number) => string
+      info: (title: string, message?: string, duration?: number) => string
+      warning: (title: string, message?: string, duration?: number) => string
+    }
+  }
+}
+
 export interface SyncStatus {
   isEnabled: boolean
   isSyncing: boolean
@@ -144,11 +156,60 @@ class SyncService {
 
       this.saveSyncStatus()
       return syncResult
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to enable sync:', error)
       return {
         success: false,
-        message: error.message || 'クラウド同期の有効化に失敗しました'
+        message: error?.message || 'クラウド同期の有効化に失敗しました'
+      }
+    }
+  }
+
+  async enableSyncForNewUser(cloudPassword: string): Promise<SyncResult> {
+    try {
+      if (!googleAuthService.isAuthenticated.value) {
+        throw new Error('Google認証が必要です')
+      }
+
+      // Validate password
+      const passwordValidation = cloudEncryptionService.validatePassword(cloudPassword)
+      if (!passwordValidation.isValid) {
+        throw new Error(`パスワードが要件を満たしていません: ${passwordValidation.errors.join(', ')}`)
+      }
+
+      // Test encryption with password
+      const encryptionTest = await cloudEncryptionService.testEncryption(cloudPassword)
+      if (!encryptionTest) {
+        throw new Error('暗号化テストに失敗しました')
+      }
+
+      this._cloudPassword.value = cloudPassword
+      this._status.value.isEnabled = true
+      this._status.value.lastSyncError = null
+
+      // For new users, create an empty initial data file in Google Drive
+      console.log('Creating initial empty data file for new user...')
+      const initialData = {
+        holdings: [],
+        locations: [],
+        prices: []
+      }
+      
+      await this.uploadToCloud(initialData)
+      console.log('Initial data file created successfully')
+      
+      this._status.value.cloudFileExists = true
+      this._status.value.lastSyncTime = Date.now()
+
+      this.startAutoSync()
+      this.saveSyncStatus()
+      
+      return { success: true, message: 'クラウド同期が有効になりました' }
+    } catch (error: any) {
+      console.error('Failed to enable sync for new user:', error)
+      return {
+        success: false,
+        message: error?.message || 'クラウド同期の有効化に失敗しました'
       }
     }
   }
@@ -234,11 +295,11 @@ class SyncService {
       this.saveSyncStatus()
 
       return { success: true, message: 'データが正常に同期されました' }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Sync failed:', error)
-      this._status.value.lastSyncError = error.message
+      this._status.value.lastSyncError = error?.message || '同期エラー'
       this.saveSyncStatus()
-      return { success: false, message: error.message || '同期に失敗しました' }
+      return { success: false, message: error?.message || '同期に失敗しました' }
     } finally {
       this._status.value.isSyncing = false
     }
@@ -463,9 +524,26 @@ class SyncService {
       clearInterval(this.syncTimer)
     }
 
-    this.syncTimer = setInterval(async () => {
+    this.syncTimer = window.setInterval(async () => {
       if (this._status.value.isEnabled && googleAuthService.isAuthenticated.value) {
-        await this.performSync()
+        try {
+          const result = await this.performSync()
+          if (!result.success) {
+            console.warn('[DEBUG] Auto sync failed:', result.message)
+            // Show warning toast for auto sync failures (less intrusive than error)
+            if (window.showToast) {
+              window.showToast.warning('定期同期エラー', `定期同期に失敗しました: ${result.message}`)
+            }
+          } else {
+            console.log('[DEBUG] Auto sync completed successfully')
+          }
+        } catch (error) {
+          console.error('[DEBUG] Auto sync error:', error)
+          // Show error toast for auto sync errors
+          if (window.showToast) {
+            window.showToast.error('定期同期エラー', '定期同期中にエラーが発生しました')
+          }
+        }
       }
     }, SYNC_CONFIG.autoSyncInterval)
   }
