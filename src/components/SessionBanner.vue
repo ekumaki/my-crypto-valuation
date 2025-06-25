@@ -15,16 +15,18 @@
         
         <div class="flex items-center space-x-4">
           <!-- Cloud Sync Status -->
-          <div v-if="syncStatus.isEnabled" class="flex items-center space-x-2">
+          <div class="flex items-center space-x-2">
             <div 
               :class="[
                 'w-2 h-2 rounded-full',
+                !syncStatus.isEnabled ? 'bg-red-500' :
                 syncStatus.isSyncing ? 'bg-yellow-500 animate-pulse' : 
                 syncStatus.lastSyncError ? 'bg-red-500' : 'bg-green-500'
               ]"
             ></div>
             <span class="text-sm text-gray-600 dark:text-gray-400">
               {{
+                !syncStatus.isEnabled ? '自動同期が無効です' :
                 syncStatus.isSyncing ? '同期中' :
                 syncStatus.lastSyncError ? `同期エラー: ${syncStatus.lastSyncError}` : 
                 syncStatus.lastSyncTime ? `同期済み (${formatSyncTime(syncStatus.lastSyncTime)})` : '同期準備完了'
@@ -50,16 +52,10 @@
             <div v-if="showDropdown" class="absolute right-0 mt-1 w-48 bg-white dark:bg-gray-800 rounded-md shadow-lg border border-gray-200 dark:border-gray-700 z-10">
               <div class="py-1">
                 <button
-                  @click="openCloudSync"
+                  @click="openSyncSettings"
                   class="block w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
                 >
-                  クラウド同期
-                </button>
-                <button
-                  @click="openPasswordSettings"
-                  class="block w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
-                >
-                  パスワード変更
+                  同期設定
                 </button>
                 <button
                   @click="logout"
@@ -82,8 +78,7 @@ import { useSessionStore } from '@/stores/session.store'
 import { syncService } from '@/services/sync.service'
 
 const emit = defineEmits<{
-  openPasswordSettings: []
-  openCloudSync: []
+  openSyncSettings: []
 }>()
 
 const sessionStore = useSessionStore()
@@ -99,14 +94,9 @@ function logout() {
   sessionStore.logout()
 }
 
-function openPasswordSettings() {
+function openSyncSettings() {
   showDropdown.value = false
-  emit('openPasswordSettings')
-}
-
-function openCloudSync() {
-  showDropdown.value = false
-  emit('openCloudSync')
+  emit('openSyncSettings')
 }
 
 function formatSyncTime(timestamp: number): string {

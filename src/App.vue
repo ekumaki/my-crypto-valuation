@@ -20,8 +20,7 @@
     <div v-else>
       <!-- Session Banner -->
       <SessionBanner 
-        @open-password-settings="showPasswordSettings = true"
-        @open-cloud-sync="showCloudSync = true"
+        @open-sync-settings="showSyncSettings = true"
       />
       
       <!-- Header -->
@@ -75,13 +74,13 @@
               保有数量入力
             </router-link>
             <button
-              @click="showCloudSync = true"
+              @click="showSyncSettings = true"
               class="border-b-2 py-4 px-1 text-sm font-medium transition-colors border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 flex items-center space-x-1"
             >
               <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
                 <path d="M5.5 16a3.5 3.5 0 01-.369-6.98 4 4 0 117.753-1.977A4.5 4.5 0 1113.5 16h-8z" />
               </svg>
-              <span>クラウド同期</span>
+              <span>同期設定</span>
             </button>
           </div>
         </div>
@@ -96,23 +95,16 @@
     <!-- Toast Notifications -->
     <Toast />
     
-    <!-- Password Settings Modal -->
-    <PasswordSettings 
-      v-if="showPasswordSettings" 
-      @close="showPasswordSettings = false" 
-      @success="handlePasswordChangeSuccess" 
-    />
-    
-    <!-- Google Drive Sync Modal -->
-    <div v-if="showCloudSync" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+    <!-- Sync Settings Modal -->
+    <div v-if="showSyncSettings" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
       <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
         <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
           <div class="flex items-center justify-between">
             <h3 class="text-lg font-medium text-gray-900 dark:text-white">
-              Google Drive同期設定
+              同期設定
             </h3>
             <button
-              @click="showCloudSync = false"
+              @click="showSyncSettings = false"
               class="text-gray-400 hover:text-gray-500 dark:hover:text-gray-300"
             >
               <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -122,7 +114,7 @@
           </div>
         </div>
         <div class="p-6">
-          <GoogleDriveConnection />
+          <SyncSettings />
         </div>
       </div>
     </div>
@@ -137,15 +129,13 @@ import LoginForm from '@/components/LoginForm.vue'
 import SessionBanner from '@/components/SessionBanner.vue'
 import TimeoutWarning from '@/components/TimeoutWarning.vue'
 import UnlockPrompt from '@/components/UnlockPrompt.vue'
-import PasswordSettings from '@/components/PasswordSettings.vue'
-import GoogleDriveConnection from '@/components/GoogleDriveConnection.vue'
+import SyncSettings from '@/components/SyncSettings.vue'
 import { useSessionStore } from '@/stores/session.store'
 
 const router = useRouter()
 const sessionStore = useSessionStore()
 const isDark = ref(document.documentElement.classList.contains('dark'))
-const showPasswordSettings = ref(false)
-const showCloudSync = ref(false)
+const showSyncSettings = ref(false)
 
 // Watch for authentication state changes
 watch(() => sessionStore.isAuthenticated, (newValue, oldValue) => {
@@ -176,10 +166,6 @@ function handleLoginSuccess() {
   console.log('[DEBUG] About to navigate to /summary')
   router.push('/summary')
   console.log('[DEBUG] Navigation to /summary completed')
-}
-
-function handlePasswordChangeSuccess() {
-  showPasswordSettings.value = false
 }
 
 onMounted(async () => {

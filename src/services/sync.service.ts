@@ -64,6 +64,11 @@ class SyncService {
   get isEnabled() { return computed(() => this._status.value.isEnabled) }
   get isSyncing() { return computed(() => this._status.value.isSyncing) }
   get hasCloudPassword() { return computed(() => this._cloudPassword.value !== null) }
+  
+  // Method to set cloud password (for manual sync scenarios)
+  setCloudPassword(password: string): void {
+    this._cloudPassword.value = password
+  }
 
   private async loadSyncStatus(): Promise<void> {
     try {
@@ -143,7 +148,43 @@ class SyncService {
         throw new Error('暗号化テストに失敗しました')
       }
 
+      // Set cloud password first
       this._cloudPassword.value = cloudPassword
+      
+      // Update local storage encryption key to match cloud password
+      const { authService } = await import('@/services/auth.service')
+      const { secureStorage } = await import('@/services/storage.service')
+      
+      // Check if user has existing auth state
+      const authState = await secureStorage.getAuthState()
+      console.log('[DEBUG] enableSync - existing authState:', authState)
+      
+      if (authState.passwordHash && authState.salt) {
+        // Existing user - verify and unlock with cloud password
+        const unlockResult = await authService.unlockWithPassword(cloudPassword)
+        if (!unlockResult.success) {
+          // Password mismatch - this could be a password change scenario
+          // Clear incompatible encrypted data and setup new password
+          console.log('[DEBUG] enableSync - password mismatch, clearing incompatible data')
+          await secureStorage.clearIncompatibleEncryptedData()
+          
+          const setupResult = await authService.setupPassword(cloudPassword)
+          if (!setupResult.success) {
+            throw new Error('ローカル暗号化キーの再設定に失敗しました')
+          }
+          console.log('[DEBUG] enableSync - password reset and new key setup completed')
+        } else {
+          console.log('[DEBUG] enableSync - existing user unlocked successfully')
+        }
+      } else {
+        // New user or reset - setup password
+        const setupResult = await authService.setupPassword(cloudPassword)
+        if (!setupResult.success) {
+          throw new Error('ローカル暗号化キーの設定に失敗しました')
+        }
+        console.log('[DEBUG] enableSync - new user password setup completed')
+      }
+
       this._status.value.isEnabled = true
       this._status.value.lastSyncError = null
 
@@ -183,7 +224,20 @@ class SyncService {
         throw new Error('暗号化テストに失敗しました')
       }
 
+      // Set cloud password first
       this._cloudPassword.value = cloudPassword
+      
+      // Update local storage encryption key to match cloud password
+      const { authService } = await import('@/services/auth.service')
+      const { secureStorage } = await import('@/services/storage.service')
+      
+      // For new users, always setup the password
+      const setupResult = await authService.setupPassword(cloudPassword)
+      if (!setupResult.success) {
+        throw new Error('ローカル暗号化キーの設定に失敗しました')
+      }
+      console.log('[DEBUG] enableSyncForNewUser - password setup completed')
+      
       this._status.value.isEnabled = true
       this._status.value.lastSyncError = null
 
@@ -192,7 +246,7 @@ class SyncService {
       const initialData = {
         holdings: [],
         locations: [],
-        prices: []
+        tokens: []
       }
       
       await this.uploadToCloud(initialData)
@@ -218,12 +272,22 @@ class SyncService {
     this._status.value.isEnabled = false
     this._cloudPassword.value = null
     this.stopAutoSync()
+    
+    // Clear local encryption key as well
+    try {
+      const { secureStorage } = await import('@/services/storage.service')
+      secureStorage.clearEncryptionKey()
+    } catch (error) {
+      console.warn('Failed to clear local encryption key:', error)
+    }
+    
     this.saveSyncStatus()
   }
 
   async performSync(): Promise<SyncResult> {
-    if (!this._status.value.isEnabled || !this._cloudPassword.value) {
-      return { success: false, message: 'クラウド同期が無効です' }
+    // 手動同期の場合、isEnabledチェックを緩和（パスワードがあれば実行可能）
+    if (!this._cloudPassword.value) {
+      return { success: false, message: 'クラウドパスワードが設定されていません' }
     }
 
     if (this._status.value.isSyncing) {
@@ -309,7 +373,22 @@ class SyncService {
     // Import secure storage to get decrypted data
     const { secureStorage } = await import('@/services/storage.service')
     
-    const holdings = await secureStorage.getHoldings()
+    let holdings: any[] = []
+    
+    try {
+      holdings = await secureStorage.getHoldings()
+    } catch (error: any) {
+      console.error('[DEBUG] getLocalData - failed to get holdings:', error)
+      
+      if (error.message === 'ENCRYPTION_KEY_MISMATCH') {
+        console.log('[DEBUG] getLocalData - clearing incompatible encrypted data')
+        await secureStorage.clearIncompatibleEncryptedData()
+        holdings = [] // Return empty holdings after clearing
+      } else {
+        throw error
+      }
+    }
+    
     const locations = await dbV2.locations.toArray()
     const tokens = await dbV2.tokens.toArray()
     
@@ -555,6 +634,15 @@ class SyncService {
     }
   }
 
+  async resetAutoSyncTimer(): Promise<void> {
+    console.log('Resetting auto-sync timer...')
+    if (this._status.value.isEnabled) {
+      this.stopAutoSync()
+      this.startAutoSync()
+      console.log('Auto-sync timer reset and restarted')
+    }
+  }
+
   async testCloudPassword(password: string): Promise<boolean> {
     try {
       const backupFile = await googleDriveApiService.findBackupFile()
@@ -572,6 +660,70 @@ class SyncService {
     } catch (error) {
       console.error('Cloud password test failed:', error)
       return false
+    }
+  }
+
+  async changeCloudPassword(currentPassword: string, newPassword: string): Promise<SyncResult> {
+    try {
+      console.log('Starting cloud password change process...')
+      
+      if (!googleAuthService.isAuthenticated.value) {
+        return { success: false, message: 'Google認証が必要です' }
+      }
+
+      // Step 1: Verify current password
+      const isCurrentPasswordValid = await this.testCloudPassword(currentPassword)
+      if (!isCurrentPasswordValid) {
+        return { success: false, message: '現在のパスワードが正しくありません' }
+      }
+
+      console.log('Current password verified')
+
+      // Step 2: Download current data with current password
+      const backupFile = await googleDriveApiService.findBackupFile()
+      if (!backupFile) {
+        return { success: false, message: 'クラウドバックアップファイルが見つかりません' }
+      }
+
+      const encryptedDataString = await googleDriveApiService.downloadFile(backupFile.id)
+      const encryptedData: EncryptedData = JSON.parse(encryptedDataString)
+      
+      // Decrypt with current password
+      const cloudData = await cloudEncryptionService.decryptPortfolioData(encryptedData, currentPassword)
+      console.log('Successfully decrypted cloud data with current password')
+
+      // Step 3: Update local authentication with new password
+      const { authService } = await import('@/services/auth.service')
+      const { secureStorage } = await import('@/services/storage.service')
+      
+      // Update local password hash and encryption key
+      const setupResult = await authService.setupPassword(newPassword)
+      if (!setupResult.success) {
+        return { success: false, message: 'ローカルパスワードの更新に失敗しました' }
+      }
+      
+      console.log('Local password updated successfully')
+
+      // Step 4: Update cloud password
+      this._cloudPassword.value = newPassword
+      
+      // Step 5: Re-encrypt and upload data with new password
+      await this.uploadToCloud(cloudData.portfolioData)
+      console.log('Successfully re-encrypted and uploaded data with new password')
+
+      // Step 6: Save sync status
+      this.saveSyncStatus()
+      
+      console.log('Cloud password change completed successfully')
+      
+      return { success: true, message: 'パスワードが正常に変更されました' }
+
+    } catch (error: any) {
+      console.error('Cloud password change failed:', error)
+      return { 
+        success: false, 
+        message: error.message || 'パスワード変更中にエラーが発生しました' 
+      }
     }
   }
 

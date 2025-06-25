@@ -286,6 +286,28 @@ class GoogleDriveApiService {
       return { used: 0, limit: 0 }
     }
   }
+
+  async getUserInfo(): Promise<{name: string, email: string, picture?: string}> {
+    try {
+      const response = await this.makeApiRequest(
+        'GET',
+        'https://www.googleapis.com/drive/v3/about?fields=user'
+      )
+
+      const user = response.user
+      return {
+        name: user?.displayName || user?.emailAddress || 'Unknown User',
+        email: user?.emailAddress || 'unknown@example.com',
+        picture: user?.photoLink || undefined
+      }
+    } catch (error) {
+      console.error('Failed to get user info:', error)
+      return {
+        name: 'Unknown User',
+        email: 'unknown@example.com'
+      }
+    }
+  }
 }
 
 // Create and export singleton instance

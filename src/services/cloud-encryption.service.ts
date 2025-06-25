@@ -220,6 +220,34 @@ class CloudEncryptionService {
       return false
     }
   }
+
+  /**
+   * Verifies password by attempting to decrypt stored data
+   */
+  async verifyPassword(password: string): Promise<boolean> {
+    try {
+      // Import Google Drive API service to check for existing backup
+      const { googleDriveApiService } = await import('./google-drive-api.service')
+      
+      const backupFile = await googleDriveApiService.findBackupFile()
+      if (!backupFile) {
+        // No cloud file exists, so password cannot be verified against cloud data
+        // This should not happen in normal flow, but we'll return true to allow operation
+        return true
+      }
+
+      // Download and try to decrypt the file
+      const encryptedDataString = await googleDriveApiService.downloadFile(backupFile.id)
+      const encryptedData: EncryptedData = JSON.parse(encryptedDataString)
+      
+      // Try to decrypt with the provided password
+      await this.decryptPortfolioData(encryptedData, password)
+      return true
+    } catch (error) {
+      console.error('Password verification failed:', error)
+      return false
+    }
+  }
 }
 
 // Create and export singleton instance

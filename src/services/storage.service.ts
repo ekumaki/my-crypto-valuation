@@ -170,12 +170,22 @@ export class SecureStorageService {
         }
       } catch (decryptError) {
         console.error('[DEBUG] getHoldings - failed to decrypt holding', i, ':', decryptError)
-        throw decryptError
+        console.error('[DEBUG] getHoldings - this is likely due to encryption key mismatch')
+        
+        // If decryption fails, it's likely due to key mismatch
+        // For sync scenarios, we should clear the incompatible data
+        throw new Error('ENCRYPTION_KEY_MISMATCH')
       }
     }
     
     console.log('[DEBUG] getHoldings - returning', holdings.length, 'processed holdings')
     return holdings
+  }
+
+  async clearIncompatibleEncryptedData(): Promise<void> {
+    console.log('[DEBUG] clearIncompatibleEncryptedData - clearing encrypted holdings...')
+    await dbV2.holdings.clear()
+    console.log('[DEBUG] clearIncompatibleEncryptedData - encrypted holdings cleared')
   }
   
   async getHoldingsByLocation(locationId: string): Promise<Holding[]> {

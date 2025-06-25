@@ -139,7 +139,7 @@ class GoogleAuthService {
     // This is for ID token (sign-in), we mainly need OAuth token for Drive API
   }
 
-  private handleTokenResponse(response: any): void {
+  private async handleTokenResponse(response: any): Promise<void> {
     console.log('OAuth token received:', response)
     if (response.access_token) {
       // Store access token
@@ -152,12 +152,26 @@ class GoogleAuthService {
       this._isAuthenticated.value = true
       this._error.value = null
       
-      // You could decode the ID token to get user info, but for simplicity:
-      this._user.value = {
-        id: 'user_id',
-        email: 'user@example.com',
-        name: 'User Name',
-        picture: undefined
+      // Get user info from Drive API (after authentication is set)
+      try {
+        const { googleDriveApiService } = await import('./google-drive-api.service')
+        const userInfo = await googleDriveApiService.getUserInfo()
+        
+        this._user.value = {
+          id: userInfo.email,
+          email: userInfo.email,
+          name: userInfo.name,
+          picture: userInfo.picture
+        }
+      } catch (error) {
+        console.error('Failed to get user info:', error)
+        // フォールバック
+        this._user.value = {
+          id: 'unknown',
+          email: 'unknown@example.com',
+          name: 'Unknown User',
+          picture: undefined
+        }
       }
       
       // Persist authentication state
@@ -182,9 +196,9 @@ class GoogleAuthService {
           this.accessToken = parsed.accessToken
           this._isAuthenticated.value = true
           this._user.value = parsed.user || {
-            id: 'user_id',
-            email: 'user@example.com',
-            name: 'User Name',
+            id: 'unknown',
+            email: 'unknown@example.com',
+            name: 'Unknown User',
             picture: undefined
           }
         } else {
