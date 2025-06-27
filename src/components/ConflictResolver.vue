@@ -1,5 +1,5 @@
 <template>
-  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[9999]">
     <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
       <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
         <div class="flex items-center justify-between">
@@ -135,26 +135,7 @@
               </div>
             </label>
 
-            <!-- Merge Data -->
-            <label class="flex items-start space-x-3 p-4 border border-gray-200 dark:border-gray-600 rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
-              <input
-                v-model="selectedResolution"
-                type="radio"
-                value="merge"
-                class="mt-1 text-indigo-600 focus:ring-indigo-500 border-gray-300"
-              >
-              <div class="flex-1">
-                <div class="font-medium text-gray-900 dark:text-white">
-                  データを統合
-                </div>
-                <p class="text-sm text-gray-600 dark:text-gray-400">
-                  ローカルとクラウドのデータを統合します。重複データは自動的に処理されます。
-                </p>
-                <div class="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                  推奨: どちらにも重要なデータが含まれている場合
-                </div>
-              </div>
-            </label>
+
           </div>
         </div>
 
@@ -174,11 +155,7 @@
                 <p class="text-green-700 dark:text-green-400">✓ クラウドデータがローカルに保存されます</p>
                 <p class="text-red-700 dark:text-red-400">✗ ローカルの既存データは削除されます</p>
               </div>
-              <div v-else-if="selectedResolution === 'merge'">
-                <p class="text-green-700 dark:text-green-400">✓ 両方のデータが統合されます</p>
-                <p class="text-yellow-700 dark:text-yellow-400">⚠ 重複したデータは自動的に統合されます</p>
-                <p class="text-blue-700 dark:text-blue-400">ℹ 結果データ数: {{ getMergedDataCounts() }}</p>
-              </div>
+
             </div>
           </div>
         </div>
@@ -210,6 +187,12 @@
             キャンセル
           </button>
           <button
+            @click="handleLogout"
+            class="bg-red-600 hover:bg-red-700 text-white font-medium py-2 px-4 rounded-lg transition-colors"
+          >
+            ログアウト
+          </button>
+          <button
             @click="resolveConflict"
             :disabled="!selectedResolution || isResolving"
             class="flex-1 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white font-medium py-2 px-4 rounded-lg transition-colors disabled:cursor-not-allowed"
@@ -226,6 +209,7 @@
 import { ref, computed } from 'vue'
 import { syncService, type SyncConflict } from '@/services/sync.service'
 import { errorHandlerService } from '@/services/error-handler.service'
+import { useSessionStore } from '@/stores/session.store'
 
 interface Props {
   conflictData: SyncConflict
@@ -235,10 +219,11 @@ const props = defineProps<Props>()
 
 const emit = defineEmits<{
   close: []
-  conflictResolved: []
+  resolved: []
 }>()
 
-const selectedResolution = ref<'local' | 'cloud' | 'merge' | null>(null)
+const sessionStore = useSessionStore()
+const selectedResolution = ref<'local' | 'cloud' | null>(null)
 const isResolving = ref(false)
 
 function formatTimestamp(timestamp: number): string {
@@ -257,22 +242,6 @@ function formatTimestamp(timestamp: number): string {
   }
 }
 
-function getMergedDataCounts(): string {
-  const localHoldings = props.conflictData.localData.holdings?.length || 0
-  const cloudHoldings = props.conflictData.cloudData.holdings?.length || 0
-  const localLocations = props.conflictData.localData.locations?.length || 0
-  const cloudLocations = props.conflictData.cloudData.locations?.length || 0
-  const localTokens = props.conflictData.localData.tokens?.length || 0
-  const cloudTokens = props.conflictData.cloudData.tokens?.length || 0
-  
-  // Simple estimate - actual merge may deduplicate
-  const estimatedHoldings = localHoldings + cloudHoldings
-  const estimatedLocations = localLocations + cloudLocations
-  const estimatedTokens = localTokens + cloudTokens
-  
-  return `保有データ約${estimatedHoldings}件、保管場所約${estimatedLocations}件、トークン約${estimatedTokens}件`
-}
-
 async function resolveConflict() {
   if (!selectedResolution.value) return
 
@@ -285,7 +254,8 @@ async function resolveConflict() {
     )
 
     if (result.success) {
-      emit('conflictResolved')
+      emit('resolved')
+      emit('close')
     } else {
       errorHandlerService.handleError(
         new Error(result.message),
@@ -297,6 +267,22 @@ async function resolveConflict() {
     errorHandlerService.handleError(error, 'Conflict Resolution', 'error')
   } finally {
     isResolving.value = false
+  }
+}
+
+async function handleLogout() {
+  try {
+    console.log('[DEBUG] ConflictResolver.handleLogout() called')
+    
+    // 競合状態をクリアしてからログアウト
+    await syncService.clearConflictState()
+    
+    // 強制的にログアウト
+    await sessionStore.logoutAndDiscardChanges()
+    emit('close')
+  } catch (error) {
+    console.error('Failed to logout from conflict resolver:', error)
+    errorHandlerService.handleError(error, 'Logout', 'error')
   }
 }
 </script>

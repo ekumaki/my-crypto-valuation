@@ -139,7 +139,7 @@
       </div>
 
       <!-- Last Sync Info -->
-      <div v-if="syncStatus.lastSyncTime && syncStatus.isEnabled" class="mb-4 p-3 bg-gray-50 dark:bg-gray-700 rounded-md">
+      <div v-if="syncStatus.lastSyncTime" class="mb-4 p-3 bg-gray-50 dark:bg-gray-700 rounded-md">
         <div class="flex items-center justify-between">
           <span class="text-sm text-gray-600 dark:text-gray-400">最終同期:</span>
           <span class="text-sm font-medium text-gray-900 dark:text-white">
@@ -149,7 +149,7 @@
       </div>
 
       <!-- Error Display -->
-      <div v-if="syncStatus.lastSyncError && syncStatus.isEnabled" class="mb-4 p-3 bg-red-50 dark:bg-red-900/20 rounded-md">
+      <div v-if="syncStatus.lastSyncError" class="mb-4 p-3 bg-red-50 dark:bg-red-900/20 rounded-md">
         <div class="flex items-start space-x-2">
           <svg class="w-5 h-5 text-red-500 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
             <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
@@ -186,8 +186,18 @@
             : 'bg-gray-300 text-gray-500 cursor-not-allowed'
         ]"
       >
-        {{ syncStatus.isSyncing ? '同期中...' : '今すぐ同期' }}
+        {{ syncStatus.isSyncing ? '同期中...' : `今すぐ同期${unsyncedDataCount.total > 0 ? ` (${unsyncedDataCount.total})` : ''}` }}
       </button>
+      
+      <!-- Unsynced data details -->
+      <div v-if="unsyncedDataCount.total > 0" class="mt-2 text-xs text-gray-600 dark:text-gray-400 text-center">
+        未同期: 
+        <span v-if="unsyncedDataCount.holdings > 0">保有数量 {{ unsyncedDataCount.holdings }}件</span>
+        <span v-if="unsyncedDataCount.holdings > 0 && (unsyncedDataCount.locations > 0 || unsyncedDataCount.tokens > 0)">, </span>
+        <span v-if="unsyncedDataCount.locations > 0">場所 {{ unsyncedDataCount.locations }}件</span>
+        <span v-if="unsyncedDataCount.locations > 0 && unsyncedDataCount.tokens > 0">, </span>
+        <span v-if="unsyncedDataCount.tokens > 0">銘柄 {{ unsyncedDataCount.tokens }}件</span>
+      </div>
       
       <p v-if="!authStatus.isAuthenticated" class="text-xs text-gray-500 dark:text-gray-400 mt-2 text-center">
         手動同期にはGoogle認証が必要です
@@ -197,32 +207,7 @@
       </p>
     </div>
 
-    <!-- セキュリティカード -->
-    <div v-if="authStatus.isAuthenticated" class="bg-gray-50 dark:bg-gray-700 rounded-lg p-4">
-      <h4 class="text-lg font-medium text-gray-900 dark:text-white mb-3 flex items-center">
-        <svg class="w-5 h-5 mr-2 text-yellow-500" fill="currentColor" viewBox="0 0 20 20">
-          <path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd" />
-        </svg>
-        セキュリティ
-      </h4>
-      
-      <button
-        @click="showPasswordChange = true"
-        :disabled="!syncStatus.isEnabled"
-        :class="[
-          'w-full font-medium py-3 px-4 rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2',
-          syncStatus.isEnabled 
-            ? 'bg-yellow-600 hover:bg-yellow-700 text-white focus:ring-yellow-500' 
-            : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-        ]"
-      >
-        パスワード変更
-      </button>
-      
-      <p v-if="!syncStatus.isEnabled" class="text-xs text-gray-500 dark:text-gray-400 mt-2 text-center">
-        パスワード変更には自動同期が必要です
-      </p>
-    </div>
+
 
 
 
@@ -249,12 +234,7 @@
       </div>
     </div>
 
-    <!-- Password Change Modal -->
-    <CloudPasswordChange
-      v-if="showPasswordChange"
-      @close="showPasswordChange = false"
-      @success="handlePasswordChangeSuccess"
-    />
+
 
     <!-- Cloud Password Setup Modal (for enabling sync) -->
     <CloudPasswordSetup
@@ -281,11 +261,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { googleAuthService } from '@/services/google-auth.service'
 import { syncService } from '@/services/sync.service'
 import { errorHandlerService } from '@/services/error-handler.service'
-import CloudPasswordChange from '@/components/CloudPasswordChange.vue'
+
 import CloudPasswordSetup from '@/components/CloudPasswordSetup.vue'
 import CloudPasswordPrompt from '@/components/CloudPasswordPrompt.vue'
 import ConflictResolver from '@/components/ConflictResolver.vue'
@@ -294,12 +274,12 @@ import { useHoldingsStoreV2 } from '@/stores/useHoldingsV2'
 import { useLocationsStore } from '@/stores/useLocations'
 
 // Reactive refs
-const showPasswordChange = ref(false)
 const showPasswordSetup = ref(false)
 const showPasswordPrompt = ref(false)
 const showConflictResolver = ref(false)
 const conflictData = ref<any>(null)
 const passwordPromptPurpose = ref<'enable_sync' | 'manual_sync'>('enable_sync')
+const unsyncedDataCount = ref<any>({ holdings: 0, locations: 0, tokens: 0, total: 0 })
 
 // Store instances for refreshing after sync
 const tokensStore = useTokensStore()
@@ -513,11 +493,7 @@ async function performManualSync() {
 
 
 
-async function handlePasswordChangeSuccess() {
-  showPasswordChange.value = false
-  // Refresh stores after password change
-  await refreshStores()
-}
+
 
 async function handleConflictResolved() {
   showConflictResolver.value = false
@@ -532,6 +508,9 @@ async function refreshStores() {
     holdingsStore.loadAggregatedHoldings(),
     locationsStore.loadLocations()
   ])
+  
+  // Update unsynced data count after refresh
+  await updateUnsyncedDataCount()
 }
 
 function formatLastSyncTime(timestamp: number): string {
@@ -551,7 +530,25 @@ function formatLastSyncTime(timestamp: number): string {
   }
 }
 
+async function updateUnsyncedDataCount() {
+  try {
+    const { metadataService } = await import('@/services/metadata.service')
+    unsyncedDataCount.value = await metadataService.getUnsyncedDataCount()
+  } catch (error) {
+    console.warn('Failed to update unsynced data count:', error)
+  }
+}
+
 onMounted(async () => {
   // Initialize services will be handled by their constructors
+  await updateUnsyncedDataCount()
+  
+  // Update unsynced data count every 5 seconds
+  const interval = setInterval(updateUnsyncedDataCount, 5000)
+  
+  // Cleanup on unmount
+  onUnmounted(() => {
+    clearInterval(interval)
+  })
 })
 </script> 

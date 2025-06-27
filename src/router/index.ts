@@ -44,7 +44,14 @@ router.beforeEach(async (to, from, next) => {
   console.log('[DEBUG] Router guard - navigating to:', to.path)
   
   const requiresAuth = to.meta.requiresAuth !== false
-  const isAuthenticated = await authService.isAuthenticated()
+  let isAuthenticated = false
+  
+  try {
+    isAuthenticated = await authService.isAuthenticated()
+  } catch (error) {
+    console.error('[DEBUG] Router guard - auth check failed:', error)
+    isAuthenticated = false
+  }
   
   console.log('[DEBUG] Router guard - requiresAuth:', requiresAuth, 'isAuthenticated:', isAuthenticated)
   

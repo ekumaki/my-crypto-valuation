@@ -25,12 +25,27 @@
               ]"
             ></div>
             <span class="text-sm text-gray-600 dark:text-gray-400">
-              {{
-                !syncStatus.isEnabled ? '自動同期が無効です' :
-                syncStatus.isSyncing ? '同期中' :
-                syncStatus.lastSyncError ? `同期エラー: ${syncStatus.lastSyncError}` : 
-                syncStatus.lastSyncTime ? `同期済み (${formatSyncTime(syncStatus.lastSyncTime)})` : '同期準備完了'
-              }}
+              <template v-if="!syncStatus.isEnabled">
+                自動同期が無効です
+                <span v-if="syncStatus.lastSyncTime" class="ml-1">
+                  (最終同期: {{ formatSyncTime(syncStatus.lastSyncTime) }})
+                </span>
+              </template>
+              <template v-else-if="syncStatus.isSyncing">
+                同期中
+              </template>
+              <template v-else-if="syncStatus.lastSyncError">
+                同期エラー: {{ syncStatus.lastSyncError }}
+                <span v-if="syncStatus.lastSyncTime" class="ml-1">
+                  (最終同期: {{ formatSyncTime(syncStatus.lastSyncTime) }})
+                </span>
+              </template>
+              <template v-else-if="syncStatus.lastSyncTime">
+                同期済み ({{ formatSyncTime(syncStatus.lastSyncTime) }})
+              </template>
+              <template v-else>
+                同期準備完了
+              </template>
             </span>
           </div>
           
@@ -58,6 +73,12 @@
                   同期設定
                 </button>
                 <button
+                  @click="openPasswordChange"
+                  class="block w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+                >
+                  パスワード変更
+                </button>
+                <button
                   @click="logout"
                   class="block w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
                 >
@@ -69,6 +90,17 @@
         </div>
       </div>
     </div>
+    
+    <!-- Logout Confirmation Modal -->
+    <LogoutConfirmModal
+      v-if="showLogoutModal"
+      :unsynced-count="unsyncedCount"
+      :is-syncing="syncStatus.isSyncing"
+      @close="showLogoutModal = false"
+      @confirm="confirmLogout"
+      @confirm-discard="confirmDiscardLogout"
+      @manual-sync="handleManualSyncBeforeLogout"
+    />
   </div>
 </template>
 
@@ -76,43 +108,100 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useSessionStore } from '@/stores/session.store'
 import { syncService } from '@/services/sync.service'
+import LogoutConfirmModal from '@/components/LogoutConfirmModal.vue'
 
-const emit = defineEmits<{
-  openSyncSettings: []
-}>()
+const emit = defineEmits<{ (e: 'open-sync-settings'): void; (e: 'open-password-change'): void; (e: 'logout-discard'): void }>()
 
 const sessionStore = useSessionStore()
-const showDropdown = ref(false)
-const dropdownRef = ref<HTMLElement | null>(null)
 
-const remainingMinutes = computed(() => sessionStore.remainingMinutes)
-const remainingDisplay = computed(() => sessionStore.remainingDisplay)
+// Sync status
 const syncStatus = computed(() => syncService.status.value)
 
-function logout() {
-  showDropdown.value = false
-  sessionStore.logout()
-}
+// Session display
+const remainingDisplay = computed(() => sessionStore.remainingDisplay)
 
-function openSyncSettings() {
-  showDropdown.value = false
-  emit('openSyncSettings')
-}
+// UI state
+const showDropdown = ref(false)
+const showLogoutModal = ref(false)
+const dropdownRef = ref<HTMLElement>()
+const unsyncedCount = ref(0)
 
+// Format sync time
 function formatSyncTime(timestamp: number): string {
   const date = new Date(timestamp)
   const now = new Date()
   const diffMs = now.getTime() - date.getTime()
-  const diffMinutes = Math.floor(diffMs / 60000)
+  const diffMins = Math.floor(diffMs / (1000 * 60))
   
-  if (diffMinutes < 1) {
-    return 'たった今'
-  } else if (diffMinutes < 60) {
-    return `${diffMinutes}分前`
-  } else if (diffMinutes < 1440) {
-    return `${Math.floor(diffMinutes / 60)}時間前`
-  } else {
-    return date.toLocaleDateString('ja-JP')
+  if (diffMins < 1) return 'たった今'
+  if (diffMins < 60) return `${diffMins}分前`
+  
+  const diffHours = Math.floor(diffMins / 60)
+  if (diffHours < 24) return `${diffHours}時間前`
+  
+  const diffDays = Math.floor(diffHours / 24)
+  return `${diffDays}日前`
+}
+
+async function checkUnsyncedData() {
+  try {
+    unsyncedCount.value = await syncService.getUnsyncedDataCount()
+  } catch (error) {
+    console.error('Failed to check unsynced data:', error)
+    unsyncedCount.value = 0
+  }
+}
+
+function openSyncSettings() {
+  showDropdown.value = false
+  emit('open-sync-settings')
+}
+
+function openPasswordChange() {
+  showDropdown.value = false
+  emit('open-password-change')
+}
+
+function logout() {
+  showDropdown.value = false
+  // 常に確認モーダルを表示し、モーダル内で未同期データをチェック
+  checkUnsyncedData().then(() => {
+    showLogoutModal.value = true
+  })
+}
+
+function confirmLogout() {
+  sessionStore.logout()
+  showLogoutModal.value = false
+}
+
+function confirmDiscardLogout() {
+  // 未同期データを破棄してログアウト
+  sessionStore.logoutAndDiscardChanges()
+  showLogoutModal.value = false
+}
+
+async function handleManualSyncBeforeLogout() {
+  try {
+    const syncResult = await syncService.performSync()
+    if (syncResult.success) {
+      // 同期成功後に未同期カウントを再確認
+      await checkUnsyncedData()
+      if (unsyncedCount.value === 0) {
+        // 未同期データがなくなったらログアウト
+        sessionStore.logout()
+        showLogoutModal.value = false
+      }
+    } else {
+      console.error('Sync failed before logout:', syncResult.message)
+      // 同期失敗でもユーザーの判断でログアウトする
+      sessionStore.logout()
+      showLogoutModal.value = false
+    }
+  } catch (error) {
+    console.error('Sync failed before logout:', error)
+    sessionStore.logout()
+    showLogoutModal.value = false
   }
 }
 
@@ -124,6 +213,7 @@ function handleClickOutside(event: Event) {
 
 onMounted(() => {
   document.addEventListener('click', handleClickOutside)
+  checkUnsyncedData()
 })
 
 onUnmounted(() => {

@@ -231,6 +231,7 @@ async function handleSubmit() {
       }
     }
 
+    // 認証成功時はisSubmittingをfalseにしない（画面切り替わりまで認証中表示を維持）
     emit('passwordProvided', password.value, rememberPassword.value)
   } catch (err) {
     retryCount.value++
@@ -252,7 +253,8 @@ async function handleSubmit() {
         error.value = ''
       }, 60000) // 1 minute lockout
     }
-  } finally {
+    
+    // エラー時のみisSubmittingをfalseにする
     isSubmitting.value = false
   }
 }

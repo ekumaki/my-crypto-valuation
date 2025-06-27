@@ -101,6 +101,24 @@ export class SecureStorageService {
     // Update last data modified timestamp for sync
     localStorage.setItem('lastDataModified', Date.now().toString())
     
+    // Update metadata for sync tracking
+    try {
+      const { metadataService } = await import('@/services/metadata.service')
+      const metadata = {
+        isNew: true,
+        isModified: false,
+        isDeleted: false,
+        isSynced: false, // 新規追加なので未同期
+        lastModified: new Date(now),
+        lastSyncTime: null,
+        version: 1
+      }
+      metadataService.updateCacheForItem('holding', newHolding.id, metadata)
+      console.log('[DEBUG] addHolding - metadata updated for new holding:', newHolding.id)
+    } catch (error) {
+      console.warn('Failed to update metadata for new holding:', error)
+    }
+    
     return newHolding.id
   }
   
@@ -131,12 +149,35 @@ export class SecureStorageService {
     // Update last data modified timestamp for sync
     localStorage.setItem('lastDataModified', Date.now().toString())
     
+    // Update metadata for sync tracking
+    try {
+      const { metadataService } = await import('@/services/metadata.service')
+      // Get existing metadata or create default
+      const existingHolding = await dbV2.table('holdings').get(id)
+      const currentMetadata = existingHolding?.metadata || metadataService.createDefaultMetadata()
+      const updatedMetadata = metadataService.markAsModified(currentMetadata)
+      metadataService.updateCacheForItem('holding', id, updatedMetadata)
+    } catch (error) {
+      console.warn('Failed to update metadata for holding update:', error)
+    }
+    
     return result
   }
   
   async deleteHolding(id: string): Promise<void> {
     if (!this.isUnlocked()) {
       throw new Error('Storage is locked')
+    }
+    
+    // Update metadata for sync tracking before deletion
+    try {
+      const { metadataService } = await import('@/services/metadata.service')
+      const existingHolding = await dbV2.table('holdings').get(id)
+      const currentMetadata = existingHolding?.metadata || metadataService.createDefaultMetadata()
+      const deletedMetadata = metadataService.markAsDeleted(currentMetadata)
+      metadataService.updateCacheForItem('holding', id, deletedMetadata)
+    } catch (error) {
+      console.warn('Failed to update metadata for holding deletion:', error)
     }
     
     await dbV2.table('holdings').delete(id)
@@ -307,74 +348,7 @@ export class SecureStorageService {
   }
 
   async ensureInitialDataExists(): Promise<void> {
-    console.log('[DEBUG] ensureInitialDataExists - checking if initial data exists...')
-    
-    // Check if locations exist
-    const locationCount = await dbV2.locations.count()
-    console.log('[DEBUG] ensureInitialDataExists - location count:', locationCount)
-    
-    if (locationCount === 0) {
-      console.log('[DEBUG] ensureInitialDataExists - populating locations...')
-      const presetLocations = [
-        // Domestic CEX
-        { id: 'bitflyer', name: 'bitFlyer', type: 'domestic_cex' as const, isCustom: false },
-        { id: 'coincheck', name: 'Coincheck', type: 'domestic_cex' as const, isCustom: false },
-        { id: 'bitbank', name: 'bitbank', type: 'domestic_cex' as const, isCustom: false },
-        { id: 'gmo-coin', name: 'GMO Coin', type: 'domestic_cex' as const, isCustom: false },
-        { id: 'sbi-vc', name: 'SBI VC Trade', type: 'domestic_cex' as const, isCustom: false },
-        
-        // Global CEX
-        { id: 'binance', name: 'Binance', type: 'global_cex' as const, isCustom: false },
-        { id: 'coinbase', name: 'Coinbase', type: 'global_cex' as const, isCustom: false },
-        { id: 'kraken', name: 'Kraken', type: 'global_cex' as const, isCustom: false },
-        { id: 'bybit', name: 'Bybit', type: 'global_cex' as const, isCustom: false },
-        { id: 'okx', name: 'OKX', type: 'global_cex' as const, isCustom: false },
-        
-        // Software Wallets
-        { id: 'metamask', name: 'MetaMask', type: 'sw_wallet' as const, isCustom: false },
-        { id: 'trust-wallet', name: 'Trust Wallet', type: 'sw_wallet' as const, isCustom: false },
-        { id: 'phantom', name: 'Phantom', type: 'sw_wallet' as const, isCustom: false },
-        { id: 'keplr', name: 'Keplr', type: 'sw_wallet' as const, isCustom: false },
-        { id: 'backpack', name: 'Backpack', type: 'sw_wallet' as const, isCustom: false },
-        
-        // Hardware Wallets
-        { id: 'ledger', name: 'Ledger', type: 'hw_wallet' as const, isCustom: false },
-        { id: 'trezor', name: 'Trezor', type: 'hw_wallet' as const, isCustom: false }
-      ]
-      
-      await dbV2.locations.bulkAdd(presetLocations)
-      console.log('[DEBUG] ensureInitialDataExists - locations populated')
-    }
-    
-    // Check if tokens exist
-    const tokenCount = await dbV2.tokens.count()
-    console.log('[DEBUG] ensureInitialDataExists - token count:', tokenCount)
-    
-    if (tokenCount === 0) {
-      console.log('[DEBUG] ensureInitialDataExists - populating tokens...')
-      const presetTokens = [
-        { symbol: 'BTC', name: 'Bitcoin', id: 'bitcoin' },
-        { symbol: 'ETH', name: 'Ethereum', id: 'ethereum' },
-        { symbol: 'BNB', name: 'BNB', id: 'binancecoin' },
-        { symbol: 'ADA', name: 'Cardano', id: 'cardano' },
-        { symbol: 'SOL', name: 'Solana', id: 'solana' },
-        { symbol: 'XRP', name: 'XRP', id: 'ripple' },
-        { symbol: 'DOT', name: 'Polkadot', id: 'polkadot' },
-        { symbol: 'DOGE', name: 'Dogecoin', id: 'dogecoin' },
-        { symbol: 'AVAX', name: 'Avalanche', id: 'avalanche-2' },
-        { symbol: 'SHIB', name: 'Shiba Inu', id: 'shiba-inu' },
-        { symbol: 'MATIC', name: 'Polygon', id: 'matic-network' },
-        { symbol: 'LTC', name: 'Litecoin', id: 'litecoin' },
-        { symbol: 'ATOM', name: 'Cosmos', id: 'cosmos' },
-        { symbol: 'LINK', name: 'Chainlink', id: 'chainlink' },
-        { symbol: 'UNI', name: 'Uniswap', id: 'uniswap' }
-      ]
-      
-      await dbV2.tokens.bulkAdd(presetTokens)
-      console.log('[DEBUG] ensureInitialDataExists - tokens populated')
-    }
-    
-    console.log('[DEBUG] ensureInitialDataExists - initial data check completed')
+    // This is now handled by metadataService.forceResetAllMetadata
   }
   
   async getAuthState(): Promise<AuthState> {

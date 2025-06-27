@@ -73,55 +73,7 @@ export class CryptoPortfolioDBV2 extends Dexie {
   }
 
   private async populate() {
-    // Populate with preset locations
-    const presetLocations: Location[] = [
-      // Domestic CEX
-      { id: 'bitflyer', name: 'bitFlyer', type: 'domestic_cex', isCustom: false },
-      { id: 'coincheck', name: 'Coincheck', type: 'domestic_cex', isCustom: false },
-      { id: 'bitbank', name: 'bitbank', type: 'domestic_cex', isCustom: false },
-      { id: 'gmo-coin', name: 'GMO Coin', type: 'domestic_cex', isCustom: false },
-      { id: 'sbi-vc', name: 'SBI VC Trade', type: 'domestic_cex', isCustom: false },
-      
-      // Global CEX
-      { id: 'binance', name: 'Binance', type: 'global_cex', isCustom: false },
-      { id: 'coinbase', name: 'Coinbase', type: 'global_cex', isCustom: false },
-      { id: 'kraken', name: 'Kraken', type: 'global_cex', isCustom: false },
-      { id: 'bybit', name: 'Bybit', type: 'global_cex', isCustom: false },
-      { id: 'okx', name: 'OKX', type: 'global_cex', isCustom: false },
-      
-      // Software Wallets
-      { id: 'metamask', name: 'MetaMask', type: 'sw_wallet', isCustom: false },
-      { id: 'trust-wallet', name: 'Trust Wallet', type: 'sw_wallet', isCustom: false },
-      { id: 'phantom', name: 'Phantom', type: 'sw_wallet', isCustom: false },
-      { id: 'keplr', name: 'Keplr', type: 'sw_wallet', isCustom: false },
-      { id: 'backpack', name: 'Backpack', type: 'sw_wallet', isCustom: false },
-      
-      // Hardware Wallets
-      { id: 'ledger', name: 'Ledger', type: 'hw_wallet', isCustom: false },
-      { id: 'trezor', name: 'Trezor', type: 'hw_wallet', isCustom: false }
-    ]
-
-    // Populate with preset tokens
-    const presetTokens: Token[] = [
-      { symbol: 'BTC', name: 'Bitcoin', id: 'bitcoin' },
-      { symbol: 'ETH', name: 'Ethereum', id: 'ethereum' },
-      { symbol: 'BNB', name: 'BNB', id: 'binancecoin' },
-      { symbol: 'ADA', name: 'Cardano', id: 'cardano' },
-      { symbol: 'SOL', name: 'Solana', id: 'solana' },
-      { symbol: 'XRP', name: 'XRP', id: 'ripple' },
-      { symbol: 'DOT', name: 'Polkadot', id: 'polkadot' },
-      { symbol: 'DOGE', name: 'Dogecoin', id: 'dogecoin' },
-      { symbol: 'AVAX', name: 'Avalanche', id: 'avalanche-2' },
-      { symbol: 'SHIB', name: 'Shiba Inu', id: 'shiba-inu' },
-      { symbol: 'MATIC', name: 'Polygon', id: 'matic-network' },
-      { symbol: 'LTC', name: 'Litecoin', id: 'litecoin' },
-      { symbol: 'ATOM', name: 'Cosmos', id: 'cosmos' },
-      { symbol: 'LINK', name: 'Chainlink', id: 'chainlink' },
-      { symbol: 'UNI', name: 'Uniswap', id: 'uniswap' }
-    ]
-
-    await this.locations.bulkAdd(presetLocations)
-    await this.tokens.bulkAdd(presetTokens)
+    // This is now handled by metadataService.forceResetAllMetadata
   }
 }
 

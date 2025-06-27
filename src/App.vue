@@ -21,6 +21,8 @@
       <!-- Session Banner -->
       <SessionBanner 
         @open-sync-settings="showSyncSettings = true"
+        @open-password-change="handlePasswordChangeRequest"
+        @logout-discard="sessionStore.logoutAndDiscardChanges"
       />
       
       <!-- Header -->
@@ -118,6 +120,41 @@
         </div>
       </div>
     </div>
+    
+    <!-- Password Change Modal -->
+    <div v-if="showPasswordChange" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+      <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full">
+        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+          <div class="flex items-center justify-between">
+            <h3 class="text-lg font-medium text-gray-900 dark:text-white">
+              パスワード変更
+            </h3>
+            <button
+              @click="showPasswordChange = false"
+              class="text-gray-400 hover:text-gray-500 dark:hover:text-gray-300"
+            >
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div class="p-6">
+          <CloudPasswordChange
+            @close="showPasswordChange = false"
+            @success="handlePasswordChangeSuccess"
+          />
+        </div>
+      </div>
+    </div>
+    
+    <!-- Conflict Resolver Modal -->
+    <ConflictResolver
+      v-if="syncService.status.value.conflictDetected && syncService.conflictData.value"
+      :conflict-data="syncService.conflictData.value"
+      @close="handleConflictClose"
+      @resolved="handleConflictResolved"
+    />
   </div>
 </template>
 
@@ -130,12 +167,16 @@ import SessionBanner from '@/components/SessionBanner.vue'
 import TimeoutWarning from '@/components/TimeoutWarning.vue'
 import UnlockPrompt from '@/components/UnlockPrompt.vue'
 import SyncSettings from '@/components/SyncSettings.vue'
+import CloudPasswordChange from '@/components/CloudPasswordChange.vue'
+import ConflictResolver from '@/components/ConflictResolver.vue'
 import { useSessionStore } from '@/stores/session.store'
+import { syncService } from '@/services/sync.service'
 
 const router = useRouter()
 const sessionStore = useSessionStore()
 const isDark = ref(document.documentElement.classList.contains('dark'))
 const showSyncSettings = ref(false)
+const showPasswordChange = ref(false)
 
 // Watch for authentication state changes
 watch(() => sessionStore.isAuthenticated, (newValue, oldValue) => {
@@ -168,6 +209,29 @@ function handleLoginSuccess() {
   console.log('[DEBUG] Navigation to /summary completed')
 }
 
+function handlePasswordChangeRequest() {
+  // Check if sync is enabled before allowing password change
+  if (!syncService.status.value.isEnabled) {
+    alert('パスワード変更には先に自動同期を有効にする必要があります。同期設定から自動同期を有効にしてください。')
+    return
+  }
+  
+  showPasswordChange.value = true
+}
+
+function handlePasswordChangeSuccess() {
+  showPasswordChange.value = false
+}
+
+function handleConflictClose() {
+  // 競合をクリアして閉じる処理は不要（ConflictResolver内で処理される）
+}
+
+function handleConflictResolved() {
+  // 競合解決後の処理（必要に応じて）
+  console.log('[DEBUG] Conflict resolved successfully')
+}
+
 onMounted(async () => {
   // Initialize dark mode from localStorage
   const savedDarkMode = localStorage.getItem('darkMode')
@@ -190,5 +254,58 @@ onMounted(async () => {
   sessionStore.initialize().then(() => {
     console.log('[DEBUG] App.vue sessionStore.initialize completed - sessionStore.isAuthenticated:', sessionStore.isAuthenticated)
   })
+  
+  // Reset any legacy unsynced data on app startup
+  try {
+    import('@/services/metadata.service').then(({ metadataService }) => {
+      // Force reset every time to ensure legacy data is cleared
+      console.log('[DEBUG] App.vue - forcing metadata reset on startup')
+      metadataService.forceResetAllMetadata().then(() => {
+        console.log('[DEBUG] App.vue - legacy unsynced data reset completed')
+        
+        // Additional cleanup of localStorage - more aggressive approach
+        const keysToRemove: string[] = []
+        const allKeys = []
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i)
+          if (key) allKeys.push(key)
+        }
+        
+        for (const key of allKeys) {
+          if (key && (
+            key.includes('unsynced') || 
+            key.includes('metadata') || 
+            key.includes('syncData') ||
+            key.includes('conflictData') ||
+            key.includes('unsyncedCount') ||
+            key.startsWith('holding_') ||
+            key.startsWith('location_') ||
+            key.startsWith('token_')
+          )) {
+            keysToRemove.push(key)
+          }
+        }
+        
+        keysToRemove.forEach(key => {
+          localStorage.removeItem(key)
+          console.log('[DEBUG] App.vue - removed legacy key:', key)
+        })
+        
+        if (keysToRemove.length > 0) {
+          console.log('[DEBUG] App.vue - additional cleanup removed', keysToRemove.length, 'legacy keys')
+        }
+        
+        // Force a complete refresh of unsynced data count
+        setTimeout(() => {
+          console.log('[DEBUG] App.vue - forcing unsynced data count refresh')
+        }, 1000)
+        
+      }).catch(error => {
+        console.warn('[DEBUG] App.vue - failed to reset legacy unsynced data:', error)
+      })
+    })
+  } catch (error) {
+    console.warn('[DEBUG] App.vue - failed to import metadata service:', error)
+  }
 })
 </script>

@@ -96,12 +96,15 @@ export class AuthService {
       console.log('[DEBUG] Setting auth state to:', newAuthState)
       await secureStorage.setAuthState(newAuthState)
       
-      // Verify it was set correctly
       const verifyState = await secureStorage.getAuthState()
       console.log('[DEBUG] Verified auth state after setting:', verifyState)
       
       // Temporarily disable idle timer for debugging
       // this.startIdleTimer()
+      
+      // ログイン時の自動同期を無効化（競合を避けるため）
+      // 代わりに、ユーザーが手動で同期を実行するか、データ変更時に自動同期される
+      console.log('[DEBUG] Login completed - auto sync disabled to prevent conflicts')
       
       return { success: true }
     } catch (error) {

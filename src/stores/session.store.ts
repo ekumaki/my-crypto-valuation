@@ -87,8 +87,15 @@ export const useSessionStore = defineStore('session', () => {
           }
         }
         
-        // Check if encryption key is missing (page refresh case)
+        // Check if encryption key is in session storage (page refresh case)
         const { secureStorage } = await import('@/services/storage.service')
+        const sessionKey = sessionStorage.getItem('encryptionKey')
+        
+        if (sessionKey) {
+          console.log('[DEBUG] Found encryption key in session storage, attempting to unlock')
+          secureStorage.setEncryptionKey(sessionKey)
+        }
+
         if (!secureStorage.isUnlocked()) {
           console.log('[DEBUG] Authentication exists but storage is locked - showing unlock prompt')
           showUnlockPrompt.value = true
@@ -138,7 +145,127 @@ export const useSessionStore = defineStore('session', () => {
     isAuthenticated.value = false
     sessionStartTime.value = 0
     clearSessionStartTime() // ローカルストレージからも削除
+    sessionStorage.removeItem('encryptionKey') // セッションストレージからキーを削除
     await authService.logout()
+  }
+
+  async function logoutAndDiscardChanges() {
+    console.log('[DEBUG] sessionStore.logoutAndDiscardChanges() called')
+    try {
+      // 1. 競合状態をクリア
+      const { syncService } = await import('@/services/sync.service')
+      syncService.clearConflictState()
+      console.log('[DEBUG] logoutAndDiscardChanges - cleared conflict state')
+      
+      // 2. 未同期データを完全に破棄
+      await discardUnsyncedData()
+      
+      // 3. 追加のクリーンアップ処理
+      await performAdditionalCleanup()
+      
+      console.log('[DEBUG] logoutAndDiscardChanges - all cleanup completed')
+    } catch (error) {
+      console.warn('[DEBUG] logoutAndDiscardChanges - failed to clear sync state:', error)
+    }
+    
+    // 通常のログアウト処理を実行
+    await logout()
+  }
+  
+  async function performAdditionalCleanup() {
+    console.log('[DEBUG] performAdditionalCleanup - starting')
+    
+    try {
+      // 同期関連のlocalStorageキーをクリア
+      const syncKeys = [
+        'lastDataModified',
+        'syncStatus',
+        'globalSyncTime',
+        'cloudPassword'
+      ]
+      
+      for (const key of syncKeys) {
+        localStorage.removeItem(key)
+        console.log('[DEBUG] performAdditionalCleanup - removed localStorage key:', key)
+      }
+      
+      // メタデータサービスの状態をリセット
+      const { metadataService } = await import('@/services/metadata.service')
+      metadataService.clearMetadataCache()
+      
+      console.log('[DEBUG] performAdditionalCleanup - completed')
+    } catch (error) {
+      console.error('[DEBUG] performAdditionalCleanup - error:', error)
+    }
+  }
+  
+  async function discardUnsyncedData() {
+    console.log('[DEBUG] discardUnsyncedData - starting complete cleanup')
+    
+    try {
+      const { metadataService } = await import('@/services/metadata.service')
+      const { syncService } = await import('@/services/sync.service')
+      const { dbV2 } = await import('@/services/db-v2')
+      
+      console.log('[DEBUG] discardUnsyncedData - clearing all user data')
+      
+      // 1. すべての保有データを削除
+      const allHoldings = await dbV2.holdings.toArray()
+      console.log('[DEBUG] discardUnsyncedData - found holdings to delete:', allHoldings.length)
+      await dbV2.holdings.clear()
+      
+      // 2. カスタムロケーションを削除（プリセットは保持）
+      const allLocations = await dbV2.locations.toArray()
+      const customLocations = allLocations.filter(location => location.isCustom)
+      console.log('[DEBUG] discardUnsyncedData - found custom locations to delete:', customLocations.length)
+      for (const location of customLocations) {
+        await dbV2.locations.delete(location.id)
+      }
+      
+      // 3. 追加されたトークンを削除（プリセットは保持）
+      const presetTokenSymbols = ['BTC', 'ETH', 'BNB', 'ADA', 'SOL', 'XRP', 'DOT', 'DOGE', 'AVAX', 'SHIB', 'MATIC', 'LTC', 'ATOM', 'LINK', 'UNI']
+      const allTokens = await dbV2.tokens.toArray()
+      const customTokens = allTokens.filter(token => !presetTokenSymbols.includes(token.symbol))
+      console.log('[DEBUG] discardUnsyncedData - found custom tokens to delete:', customTokens.length)
+      for (const token of customTokens) {
+        await dbV2.tokens.delete(token.symbol)
+      }
+      
+      // 4. 残存するプリセットデータのメタデータを同期済みに更新
+      const now = new Date()
+      const syncedMetadata = {
+        isNew: false,
+        isModified: false,
+        isDeleted: false,
+        isSynced: true,
+        lastModified: now,
+        lastSyncTime: now,
+        version: 1
+      }
+      
+      // プリセットロケーションのメタデータを更新
+      const remainingLocations = await dbV2.locations.toArray()
+      for (const location of remainingLocations) {
+        await dbV2.locations.update(location.id, { metadata: syncedMetadata })
+      }
+      
+      // プリセットトークンのメタデータを更新
+      const remainingTokens = await dbV2.tokens.toArray()
+      for (const token of remainingTokens) {
+        await dbV2.tokens.update(token.symbol, { metadata: syncedMetadata })
+      }
+      
+      // 5. メタデータキャッシュを完全にクリア
+      metadataService.clearMetadataCache()
+      
+      // 6. グローバル同期時刻を設定
+      metadataService.setGlobalSyncTime(now)
+      
+      console.log('[DEBUG] discardUnsyncedData - complete cleanup finished')
+      
+    } catch (error) {
+      console.error('[DEBUG] discardUnsyncedData - error during cleanup:', error)
+    }
   }
   
   function extendSession() {
@@ -285,6 +412,18 @@ export const useSessionStore = defineStore('session', () => {
   async function handleUnlockSuccess() {
     console.log('[DEBUG] handleUnlockSuccess - refreshing stores')
     
+    // アンロック成功時にキーをセッションストレージに保存
+    try {
+      const { secureStorage } = await import('@/services/storage.service')
+      const key = secureStorage.getEncryptionKey()
+      if (key) {
+        sessionStorage.setItem('encryptionKey', key)
+        console.log('[DEBUG] Encryption key saved to session storage')
+      }
+    } catch (error) {
+      console.warn('[DEBUG] Failed to save encryption key to session storage:', error)
+    }
+    
     // Refresh all stores after unlock BEFORE closing prompt
     try {
       const { secureStorage } = await import('@/services/storage.service')
@@ -391,6 +530,7 @@ export const useSessionStore = defineStore('session', () => {
     initialize,
     login,
     logout,
+    logoutAndDiscardChanges,
     extendSession,
     requestUnlock,
     handleUnlockSuccess,

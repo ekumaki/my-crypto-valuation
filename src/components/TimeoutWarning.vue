@@ -38,14 +38,29 @@
         </div>
       </div>
     </div>
+    
+    <!-- Logout Confirmation Modal -->
+    <LogoutConfirmModal
+      v-if="showLogoutModal"
+      :unsynced-count="unsyncedCount"
+      :is-syncing="syncService.status.value.isSyncing"
+      @close="showLogoutModal = false"
+      @confirm="confirmLogout"
+      @confirm-discard="confirmDiscardLogout"
+      @manual-sync="handleManualSyncBeforeLogout"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useSessionStore } from '@/stores/session.store'
+import { syncService } from '@/services/sync.service'
+import LogoutConfirmModal from '@/components/LogoutConfirmModal.vue'
 
 const sessionStore = useSessionStore()
+const showLogoutModal = ref(false)
+const unsyncedCount = ref(0)
 
 const show = computed(() => sessionStore.showWarning)
 const remainingMinutes = computed(() => Math.max(1, sessionStore.remainingMinutes))
@@ -54,8 +69,71 @@ function extendSession() {
   sessionStore.extendSession()
 }
 
-function logout() {
+async function logout() {
+  try {
+    // Check for unsynced data and conflicts
+    unsyncedCount.value = await syncService.getUnsyncedDataCount()
+    
+    // Also check for conflicts
+    if (syncService.status.value.conflictDetected) {
+      // If there's a conflict, count it as unsynced data
+      const localData = await syncService.getLocalData()
+      const localDataCount = (localData.holdings?.length || 0) + 
+                            (localData.locations?.length || 0) + 
+                            (localData.tokens?.length || 0)
+      unsyncedCount.value = Math.max(unsyncedCount.value, localDataCount)
+    }
+    
+    showLogoutModal.value = true
+  } catch (error) {
+    // If checking unsynced data fails, show modal with 0 count
+    unsyncedCount.value = 0
+    showLogoutModal.value = true
+  }
+}
+
+function confirmLogout() {
+  showLogoutModal.value = false
   sessionStore.logout()
+}
+
+function confirmDiscardLogout() {
+  showLogoutModal.value = false
+  sessionStore.logoutAndDiscardChanges()
+}
+
+async function handleManualSyncBeforeLogout() {
+  try {
+    // Check if cloud password is set
+    if (!syncService.hasCloudPassword.value) {
+      // Show password prompt or error
+      if (window.showToast) {
+        window.showToast.error('同期エラー', 'クラウドパスワードが設定されていません。先に同期設定から自動同期を有効にしてください。')
+      }
+      return
+    }
+    
+    // Perform manual sync
+    const result = await syncService.performSync()
+    if (result.success) {
+      // Sync successful, update unsynced count and close modal (don't logout)
+      unsyncedCount.value = 0
+      showLogoutModal.value = false
+      if (window.showToast) {
+        window.showToast.success('同期完了', '同期が正常に完了しました')
+      }
+    } else {
+      // Sync failed, show error but keep modal open
+      if (window.showToast) {
+        window.showToast.error('同期エラー', result.message || '同期に失敗しました')
+      }
+    }
+  } catch (error) {
+    console.error('Manual sync failed:', error)
+    if (window.showToast) {
+      window.showToast.error('同期エラー', '同期中にエラーが発生しました')
+    }
+  }
 }
 
 function dismissWarning() {

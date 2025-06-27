@@ -317,15 +317,91 @@ async function save() {
       note: note.value.trim() || undefined
     }
 
+    // 同期状態を確認して適切な保存方法を選択
+    const { syncService } = await import('@/services/sync.service')
     let success = false
-    if (isEditing.value && props.holding) {
-      success = await holdingsStore.updateHolding(props.holding.id, holdingData)
+    let newHoldingId: string | number
+    
+    if (syncService.isEnabled.value) {
+      // 同期有効時はSecureStorageを使用
+      if (isEditing.value && props.holding) {
+        success = await holdingsStore.updateHolding(props.holding.id, holdingData)
+        newHoldingId = props.holding.id
+      } else {
+        success = await holdingsStore.addHolding(holdingData)
+        // 新規追加の場合、最新の保有データのIDを取得
+        const { dbV2 } = await import('@/services/db-v2')
+        const holdings = await dbV2.holdings.orderBy('updatedAt').reverse().limit(1).toArray()
+        newHoldingId = holdings[0]?.id || Date.now()
+      }
     } else {
-      success = await holdingsStore.addHolding(holdingData)
+      // 同期無効時はdbServiceV2を介して保存（暗号化なし）
+      const { dbServiceV2 } = await import('@/services/db-v2')
+
+      if (isEditing.value && props.holding) {
+        const updates = {
+          locationId: holdingData.locationId,
+          symbol: holdingData.symbol,
+          quantity: holdingData.quantity,
+          note: holdingData.note
+        }
+        await dbServiceV2.updateHolding(props.holding.id, updates)
+        newHoldingId = props.holding.id
+        success = true
+        console.log('Holding updated directly in database via dbServiceV2 (sync disabled)')
+      } else {
+        newHoldingId = await dbServiceV2.addHolding(holdingData)
+        success = true
+        console.log('Holding added directly to database via dbServiceV2 (sync disabled)')
+      }
     }
 
     if (success) {
       emit('saved')
+      
+      // 保有データ追加・更新後にメタデータを適切に更新と自動同期処理
+      try {
+        const { metadataService } = await import('@/services/metadata.service')
+        const now = new Date()
+        
+        // 保有データのメタデータを設定
+        const holdingMetadata = {
+          isNew: !isEditing.value,
+          isModified: isEditing.value,
+          isDeleted: false,
+          isSynced: false,
+          lastModified: now,
+          lastSyncTime: null,
+          version: 1
+        }
+        
+        // 同期無効時は特別フラグを追加（UI表示用）
+        if (!syncService.isEnabled.value) {
+          (holdingMetadata as any).syncDisabled = true
+        }
+        
+        await metadataService.updateCacheForItem('holding', newHoldingId, holdingMetadata)
+        console.log('[DEBUG] Holding metadata updated for ID:', newHoldingId, syncService.isEnabled.value ? 'for sync' : 'with syncDisabled flag')
+        
+        // 自動同期を実行（同期有効かつクラウドパスワードがある場合のみ）
+        if (syncService.isEnabled.value && syncService.hasCloudPassword.value) {
+          console.log('[DEBUG] Holding saved - triggering auto sync')
+          const syncResult = await syncService.performSync()
+          if (syncResult.success) {
+            console.log('[DEBUG] Holding saved - auto sync completed successfully')
+          } else {
+            console.warn('[DEBUG] Holding saved - auto sync failed:', syncResult.message)
+            
+            // 競合が発生した場合の処理
+            if (syncResult.conflictData) {
+              console.log('[DEBUG] Holding saved - conflict detected during auto sync')
+            }
+          }
+        }
+      } catch (error) {
+        console.warn('[DEBUG] Holding metadata/sync processing failed:', error)
+        // メタデータ/同期エラーでも保存は成功として処理
+      }
     } else {
       error.value = isEditing.value ? 'データの更新に失敗しました' : 'データの追加に失敗しました'
     }
