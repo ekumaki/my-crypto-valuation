@@ -348,46 +348,76 @@ function handleForgotPassword() {
 
 async function handleReset() {
   try {
+    console.log('[RESET] Starting reset process...')
+    
     // Google Driveのバックアップファイルを削除
     try {
+      console.log('[RESET] Google auth status:', googleAuthService.isAuthenticated.value)
+      
       if (googleAuthService.isAuthenticated.value) {
         const { googleDriveApiService } = await import('@/services/google-drive-api.service')
+        console.log('[RESET] Google Drive API service imported')
+        
+        // まず現在のアプリフォルダ内の全ファイルを確認
+        console.log('[RESET] Listing all files in app folder...')
+        const allFiles = await googleDriveApiService.listFiles()
+        console.log('[RESET] All files in app folder:', allFiles.map(f => ({ name: f.name, id: f.id, mimeType: f.mimeType })))
         
         // 複数回試行してファイルを見つけて削除
         let retryCount = 0
         const maxRetries = 3
+        let filesDeleted = false
         
-        while (retryCount < maxRetries) {
+        while (retryCount < maxRetries && !filesDeleted) {
           try {
+            console.log(`[RESET] Deletion attempt ${retryCount + 1}/${maxRetries}`)
+            
+            // 特定のバックアップファイルを探す
             const backupFile = await googleDriveApiService.findBackupFile()
             if (backupFile) {
-              console.log('Deleting Google Drive backup file:', backupFile.name, 'ID:', backupFile.id)
+              console.log('[RESET] Found backup file:', backupFile.name, 'ID:', backupFile.id)
               await googleDriveApiService.deleteFile(backupFile.id)
-              console.log('Google Drive backup file deleted successfully')
-              break
+              console.log('[RESET] Backup file deleted successfully')
+              filesDeleted = true
             } else {
-              console.log(`No Google Drive backup file found (attempt ${retryCount + 1}/${maxRetries})`)
-              
-              // ファイルが見つからない場合、アプリフォルダ内の全ファイルをチェック
-              const allFiles = await googleDriveApiService.listFiles()
-              console.log('All files in app folder:', allFiles.map(f => ({ name: f.name, id: f.id })))
-              
-              // JSONファイルを探して削除
-              const jsonFiles = allFiles.filter(f => f.name.endsWith('.json'))
-              if (jsonFiles.length > 0) {
-                for (const file of jsonFiles) {
-                  console.log('Deleting JSON file:', file.name, 'ID:', file.id)
+              console.log('[RESET] No specific backup file found, checking all JSON files...')
+            }
+            
+            // 全てのJSONファイルを削除（バックアップファイルが見つからない場合も含む）
+            const jsonFiles = allFiles.filter(f => 
+              f.name.endsWith('.json') || 
+              f.name.includes('portfolio') || 
+              f.name.includes('backup') ||
+              f.mimeType === 'application/json'
+            )
+            
+            console.log('[RESET] JSON/backup files found:', jsonFiles.map(f => ({ name: f.name, id: f.id })))
+            
+            if (jsonFiles.length > 0) {
+              for (const file of jsonFiles) {
+                try {
+                  console.log('[RESET] Deleting file:', file.name, 'ID:', file.id)
                   await googleDriveApiService.deleteFile(file.id)
-                  console.log('JSON file deleted successfully')
+                  console.log('[RESET] File deleted successfully:', file.name)
+                  filesDeleted = true
+                } catch (deleteError) {
+                  console.error('[RESET] Failed to delete file:', file.name, deleteError)
                 }
-                break
-              } else {
-                console.log('No JSON files found in app folder')
-                break
               }
             }
+            
+            // 削除後に再度ファイルリストを確認
+            console.log('[RESET] Verifying deletion...')
+            const remainingFiles = await googleDriveApiService.listFiles()
+            console.log('[RESET] Remaining files after deletion:', remainingFiles.map(f => ({ name: f.name, id: f.id })))
+            
+            if (filesDeleted || remainingFiles.length === 0) {
+              console.log('[RESET] File deletion completed')
+              break
+            }
+            
           } catch (retryError) {
-            console.warn(`Google Drive file deletion attempt ${retryCount + 1} failed:`, retryError)
+            console.warn(`[RESET] Google Drive file deletion attempt ${retryCount + 1} failed:`, retryError)
             retryCount++
             if (retryCount >= maxRetries) {
               throw retryError
@@ -396,9 +426,16 @@ async function handleReset() {
             await new Promise(resolve => setTimeout(resolve, 1000))
           }
         }
+        
+        if (!filesDeleted) {
+          console.warn('[RESET] No files were deleted after all attempts')
+        }
+        
+      } else {
+        console.log('[RESET] Not authenticated with Google, skipping Drive file deletion')
       }
     } catch (error) {
-      console.warn('Google Drive file deletion failed:', error)
+      console.error('[RESET] Google Drive file deletion failed:', error)
       // Continue with local reset even if cloud deletion fails
     }
     

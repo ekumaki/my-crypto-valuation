@@ -164,7 +164,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { useTokensStore } from '@/stores/useTokens'
-import { useHoldingsStore } from '@/stores/useHoldings'
+import { useHoldingsStoreV2 } from '@/stores/useHoldingsV2'
 
 interface TokenResult {
   id: string
@@ -179,7 +179,7 @@ const emit = defineEmits<{
 }>()
 
 const tokensStore = useTokensStore()
-const holdingsStore = useHoldingsStore()
+const holdingsStore = useHoldingsStoreV2()
 
 const searchQuery = ref('')
 const selectedToken = ref<TokenResult | null>(null)
@@ -246,108 +246,23 @@ async function addToken() {
     const qty = parseFloat(quantity.value) || 0
     console.log('Quantity:', qty)
     if (qty > 0) {
-      // 同期状態を確認して適切な保存方法を選択
-      const { syncService } = await import('@/services/sync.service')
+      // useHoldingsV2ストアを使用（同期状態は内部で処理される）
+      const locationId = 'bitflyer' // デフォルトロケーション
       
-      if (syncService.isEnabled.value) {
-        // 同期有効時はSecureStorageを使用
-        const holdingResult = await holdingsStore.updateHolding(selectedToken.value.symbol, qty, note.value)
-        console.log('Holding update result:', holdingResult)
-      } else {
-        // 同期無効時はdbServiceV2を介して保存（暗号化なし）
-        const { dbServiceV2 } = await import('@/services/db-v2')
-        const locationId = 'bitflyer' // デフォルトロケーション
-        
-        await dbServiceV2.addHolding({
-          symbol: selectedToken.value.symbol,
-          quantity: qty,
-          locationId: locationId,
-          note: note.value || ''
-        })
-        console.log('Holding added directly to database via dbServiceV2 (sync disabled)')
-      }
+      const holdingResult = await holdingsStore.addHolding({
+        symbol: selectedToken.value.symbol,
+        quantity: qty,
+        locationId: locationId,
+        note: note.value || ''
+      })
+      console.log('Holding addition result:', holdingResult)
     }
 
     console.log('Emitting token-added event')
     emit('token-added')
     
-    // 通貨追加後にメタデータを更新と自動同期処理
-    try {
-      const { metadataService } = await import('@/services/metadata.service')
-      const { syncService } = await import('@/services/sync.service')
-      
-      const now = new Date()
-      
-            // トークンのメタデータを設定
-      const tokenMetadata = {
-        isNew: true,
-        isModified: false, 
-        isDeleted: false,
-        isSynced: false,
-        lastModified: now,
-        lastSyncTime: null,
-        version: 1
-      }
-      
-      // 同期無効時は特別フラグを追加（UI表示用）
-      if (!syncService.isEnabled.value) {
-        (tokenMetadata as any).syncDisabled = true
-      }
-      
-      await metadataService.updateCacheForItem('token', selectedToken.value.symbol, tokenMetadata)
-      console.log('[DEBUG] Token metadata updated:', syncService.isEnabled.value ? 'for sync' : 'with syncDisabled flag')
-      
-      // 保有データがある場合のメタデータも設定
-      if (qty > 0) {
-        const holdingMetadata = {
-          isNew: true,
-          isModified: false,
-          isDeleted: false,
-          isSynced: false,
-          lastModified: now,
-          lastSyncTime: null,
-          version: 1
-        }          
-          // 同期無効時は特別フラグを追加（UI表示用）
-          if (!syncService.isEnabled.value) {
-            (holdingMetadata as any).syncDisabled = true
-          }
-          
-          // 保有データのIDを取得（同期有効時は暗号化されたIDを使用）
-        let holdingId = selectedToken.value.symbol
-        if (syncService.isEnabled.value) {
-          try {
-            const { dbV2 } = await import('@/services/db-v2')
-            const holdings = await dbV2.holdings.orderBy('updatedAt').reverse().limit(1).toArray()
-            holdingId = holdings[0]?.id || selectedToken.value.symbol
-          } catch (error) {
-            console.warn('[DEBUG] Failed to get holding ID, using symbol:', error)
-          }
-        }
-        
-        await metadataService.updateCacheForItem('holding', holdingId, holdingMetadata)
-        console.log('[DEBUG] Holding metadata updated for ID:', holdingId)
-      }
-      
-      // 自動同期を実行（同期有効かつクラウドパスワードがある場合のみ）
-      if (syncService.isEnabled.value && syncService.hasCloudPassword.value) {
-        console.log('[DEBUG] Token added - triggering auto sync')
-        const syncResult = await syncService.performSync()
-        if (syncResult.success) {
-          console.log('[DEBUG] Token added - auto sync completed successfully')
-        } else {
-          console.warn('[DEBUG] Token added - auto sync failed:', syncResult.message)
-          
-          // 競合が発生した場合の処理
-          if (syncResult.conflictData) {
-            console.log('[DEBUG] Token added - conflict detected during auto sync')
-          }
-        }
-      }
-    } catch (error) {
-      console.warn('[DEBUG] Token metadata/sync processing failed:', error)
-      // メタデータ/同期エラーでもトークン追加は成功として処理
-    }
+    // メタデータ処理と自動同期はuseHoldingsV2ストア内で実行されるため、
+    // ここでは追加処理は不要
   } catch (err) {
     error.value = 'エラーが発生しました: ' + (err as Error).message
     console.error('Failed to add token:', err)

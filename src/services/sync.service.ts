@@ -17,6 +17,35 @@ declare global {
   }
 }
 
+// Event emitter for sync events
+class SyncEventEmitter {
+  private listeners: Map<string, Function[]> = new Map()
+
+  on(event: string, callback: Function) {
+    if (!this.listeners.has(event)) {
+      this.listeners.set(event, [])
+    }
+    this.listeners.get(event)!.push(callback)
+  }
+
+  off(event: string, callback: Function) {
+    const callbacks = this.listeners.get(event)
+    if (callbacks) {
+      const index = callbacks.indexOf(callback)
+      if (index > -1) {
+        callbacks.splice(index, 1)
+      }
+    }
+  }
+
+  emit(event: string, ...args: any[]) {
+    const callbacks = this.listeners.get(event)
+    if (callbacks) {
+      callbacks.forEach(callback => callback(...args))
+    }
+  }
+}
+
 export interface SyncStatus {
   isEnabled: boolean
   isSyncing: boolean
@@ -55,6 +84,7 @@ class SyncService {
   private _conflictData = ref<SyncConflict | null>(null)
   private syncTimer: number | null = null
   private conflictCheckTimer: number | null = null
+  private eventEmitter = new SyncEventEmitter()
 
   constructor() {
     this.loadSyncStatus()
@@ -69,6 +99,31 @@ class SyncService {
   get isSyncing() { return computed(() => this._status.value.isSyncing) }
   get hasCloudPassword() { return computed(() => this._cloudPassword.value !== null) }
   get conflictData() { return computed(() => this._conflictData.value) }
+  
+  // Event emitter methods
+  onSyncComplete(callback: Function) {
+    this.eventEmitter.on('syncComplete', callback)
+  }
+
+  offSyncComplete(callback: Function) {
+    this.eventEmitter.off('syncComplete', callback)
+  }
+
+  onConflictResolved(callback: Function) {
+    this.eventEmitter.on('conflictResolved', callback)
+  }
+
+  offConflictResolved(callback: Function) {
+    this.eventEmitter.off('conflictResolved', callback)
+  }
+
+  private emitSyncComplete() {
+    this.eventEmitter.emit('syncComplete')
+  }
+
+  private emitConflictResolved() {
+    this.eventEmitter.emit('conflictResolved')
+  }
   
   /**
    * Clear conflict state - useful for forced logout scenarios
@@ -372,6 +427,7 @@ class SyncService {
         metadataService.clearMetadataCache()
         console.log('[DEBUG] performSync - metadata cache cleared after initial sync')
         
+        this.emitSyncComplete()
         return { success: true, message: '初回同期が完了しました' }
       }
 
@@ -413,6 +469,7 @@ class SyncService {
         metadataService.clearMetadataCache()
         console.log('[DEBUG] performSync - metadata cache cleared after identical data sync')
         
+        this.emitSyncComplete()
         return { success: true, message: '同期が完了しました（変更なし）' }
       }
 
@@ -444,6 +501,7 @@ class SyncService {
         metadataService.clearMetadataCache()
         console.log('[DEBUG] performSync - metadata cache cleared after new data upload')
         
+        this.emitSyncComplete()
         return { success: true, message: '新しいデータが同期されました' }
       }
 
@@ -463,6 +521,7 @@ class SyncService {
         this.saveSyncStatus()
         
         console.log('[DEBUG] performSync - conflict detected, stored for resolution')
+        this.emitConflictResolved()
         return {
           success: false,
           message: 'データに競合が検出されました。競合を解決してください。',
@@ -483,18 +542,19 @@ class SyncService {
       this._status.value.cloudFileExists = true
       this.saveSyncStatus()
 
-      // Mark all data as synced after successful merge
-      const { metadataService } = await import('@/services/metadata.service')
-      await metadataService.markAllAsSynced()
-      console.log('[DEBUG] performSync - merge completed, all data marked as synced')
+              // Mark all data as synced after successful merge
+        const { metadataService: metadataServiceMerge } = await import('@/services/metadata.service')
+        await metadataServiceMerge.markAllAsSynced()
+        console.log('[DEBUG] performSync - merge completed, all data marked as synced')
 
-      // 同期時刻をメタデータサービスにも保存
-      metadataService.setGlobalSyncTime(new Date(this._status.value.lastSyncTime))
+        // 同期時刻をメタデータサービスにも保存
+        metadataServiceMerge.setGlobalSyncTime(new Date(this._status.value.lastSyncTime))
 
-      // キャッシュを強制的にクリアして未同期件数を正しく更新
-      metadataService.clearMetadataCache()
+        // キャッシュを強制的にクリアして未同期件数を正しく更新
+        metadataServiceMerge.clearMetadataCache()
       console.log('[DEBUG] performSync - metadata cache cleared after merge completion')
 
+      this.emitSyncComplete()
       return { success: true, message: '同期が完了しました' }
     } catch (error: any) {
       console.error('[DEBUG] performSync - error occurred:', error)
@@ -821,6 +881,7 @@ class SyncService {
       }
 
       console.log('[DEBUG] resolveConflict - completed successfully')
+      this.emitConflictResolved()
       return { success: true, message: '競合が解決されました' }
     } catch (error) {
       console.error('Failed to resolve conflict:', error)

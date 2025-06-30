@@ -533,10 +533,15 @@ function formatLastSyncTime(timestamp: number): string {
 async function updateUnsyncedDataCount() {
   try {
     const { metadataService } = await import('@/services/metadata.service')
-    unsyncedDataCount.value = await metadataService.getUnsyncedDataCount()
+    unsyncedDataCount.value = await metadataService.getUnsyncedDataCount(syncStatus.value.isEnabled)
   } catch (error) {
     console.warn('Failed to update unsynced data count:', error)
   }
+}
+
+// Exposed method for external components to trigger update
+function refreshUnsyncedCount() {
+  updateUnsyncedDataCount()
 }
 
 onMounted(async () => {
@@ -546,9 +551,15 @@ onMounted(async () => {
   // Update unsynced data count every 5 seconds
   const interval = setInterval(updateUnsyncedDataCount, 5000)
   
+  // Listen for sync completion events to immediately update count
+  syncService.onSyncComplete(updateUnsyncedDataCount)
+  syncService.onConflictResolved(updateUnsyncedDataCount)
+  
   // Cleanup on unmount
   onUnmounted(() => {
     clearInterval(interval)
+    syncService.offSyncComplete(updateUnsyncedDataCount)
+    syncService.offConflictResolved(updateUnsyncedDataCount)
   })
 })
 </script> 

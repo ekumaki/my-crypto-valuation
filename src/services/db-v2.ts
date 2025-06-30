@@ -116,7 +116,8 @@ export const dbServiceV2 = {
       createdAt: now,
       updatedAt: now
     }
-    return await dbV2.holdings.add(newHolding)
+    await dbV2.holdings.add(newHolding)
+    return newHolding.id
   },
 
   async updateHolding(id: string, updates: Partial<Omit<Holding, 'id' | 'createdAt'>>): Promise<number> {
