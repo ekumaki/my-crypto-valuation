@@ -42,23 +42,41 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
       if (!secureStorage.isUnlocked()) {
         console.log('[DEBUG] ensureStorageUnlocked - storage is locked, attempting auto unlock...')
         
-        // Try to restore encryption key from session storage
-        const sessionKeyData = sessionStorage.getItem('encryptionKey')
+        // Try to restore encryption key from session storage or local storage
+        let keyData = sessionStorage.getItem('encryptionKey')
+        let keySource = 'session'
         
-        if (sessionKeyData) {
+        // セッションストレージにない場合はローカルストレージから取得
+        if (!keyData) {
+          keyData = localStorage.getItem('encryptionKey')
+          keySource = 'local'
+        }
+        
+        if (keyData) {
           try {
             const { CryptoService } = await import('@/services/crypto.service')
-            const cryptoKey = await CryptoService.importKey(sessionKeyData)
+            const cryptoKey = await CryptoService.importKey(keyData)
             secureStorage.setEncryptionKey(cryptoKey)
             
             if (secureStorage.isUnlocked()) {
-              console.log('[DEBUG] ensureStorageUnlocked - successfully auto-unlocked with session key')
+              console.log(`[DEBUG] ensureStorageUnlocked - successfully auto-unlocked with ${keySource} key`)
+              
+              // セッションストレージにキーがない場合は保存
+              if (keySource === 'local' && !sessionStorage.getItem('encryptionKey')) {
+                sessionStorage.setItem('encryptionKey', keyData)
+                console.log('[DEBUG] ensureStorageUnlocked - restored key to session storage')
+              }
+              
               return true
             }
           } catch (keyError) {
-            console.error('[DEBUG] ensureStorageUnlocked - failed to import key from session storage:', keyError)
-            // Remove invalid key from session storage
-            sessionStorage.removeItem('encryptionKey')
+            console.error(`[DEBUG] ensureStorageUnlocked - failed to import key from ${keySource} storage:`, keyError)
+            // Remove invalid key
+            if (keySource === 'session') {
+              sessionStorage.removeItem('encryptionKey')
+            } else {
+              localStorage.removeItem('encryptionKey')
+            }
           }
         }
         

@@ -366,13 +366,9 @@ class SyncService {
     this._cloudPassword.value = null
     this.stopAutoSync()
     
-    // Clear local encryption key as well
-    try {
-      const { secureStorage } = await import('@/services/storage.service')
-      secureStorage.clearEncryptionKey()
-    } catch (error) {
-      console.warn('Failed to clear local encryption key:', error)
-    }
+    // Note: We intentionally do NOT clear the encryption key here
+    // to allow continued local data access without re-authentication
+    console.log('[DEBUG] disableSync - sync disabled but encryption key preserved for local access')
     
     this.saveSyncStatus()
   }
@@ -396,22 +392,39 @@ class SyncService {
       if (!secureStorage.isUnlocked()) {
         console.log('[DEBUG] performSync - storage is locked, attempting auto unlock...')
         
-        // Try to restore encryption key from session storage
-        const sessionKeyData = sessionStorage.getItem('encryptionKey')
+        // Try to restore encryption key from session storage or local storage
+        let keyData = sessionStorage.getItem('encryptionKey')
+        let keySource = 'session'
         
-        if (sessionKeyData) {
+        // セッションストレージにない場合はローカルストレージから取得
+        if (!keyData) {
+          keyData = localStorage.getItem('encryptionKey')
+          keySource = 'local'
+        }
+        
+        if (keyData) {
           try {
             const { CryptoService } = await import('@/services/crypto.service')
-            const cryptoKey = await CryptoService.importKey(sessionKeyData)
+            const cryptoKey = await CryptoService.importKey(keyData)
             secureStorage.setEncryptionKey(cryptoKey)
             
             if (secureStorage.isUnlocked()) {
-              console.log('[DEBUG] performSync - successfully auto-unlocked with session key')
+              console.log(`[DEBUG] performSync - successfully auto-unlocked with ${keySource} key`)
+              
+              // セッションストレージにキーがない場合は保存
+              if (keySource === 'local' && !sessionStorage.getItem('encryptionKey')) {
+                sessionStorage.setItem('encryptionKey', keyData)
+                console.log('[DEBUG] performSync - restored key to session storage')
+              }
             }
           } catch (keyError) {
-            console.error('[DEBUG] performSync - failed to import key from session storage:', keyError)
-            // Remove invalid key from session storage
-            sessionStorage.removeItem('encryptionKey')
+            console.error(`[DEBUG] performSync - failed to import key from ${keySource} storage:`, keyError)
+            // Remove invalid key
+            if (keySource === 'session') {
+              sessionStorage.removeItem('encryptionKey')
+            } else {
+              localStorage.removeItem('encryptionKey')
+            }
           }
         }
         
