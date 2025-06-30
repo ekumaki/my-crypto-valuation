@@ -53,7 +53,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useSessionStore } from '@/stores/session.store'
 import { syncService } from '@/services/sync.service'
 import LogoutConfirmModal from '@/components/LogoutConfirmModal.vue'
@@ -64,6 +64,25 @@ const unsyncedCount = ref(0)
 
 const show = computed(() => sessionStore.showWarning)
 const remainingMinutes = computed(() => Math.max(1, sessionStore.remainingMinutes))
+
+// 未同期件数を更新する関数
+async function refreshUnsyncedCount() {
+  try {
+    // 同期状態を取得
+    const { syncService } = await import('@/services/sync.service')
+    const isSyncEnabled = syncService.isEnabled.value
+    
+    // メタデータサービスから未同期件数を取得
+    const { metadataService } = await import('@/services/metadata.service')
+    const unsyncedData = await metadataService.getUnsyncedDataCount(isSyncEnabled)
+    unsyncedCount.value = unsyncedData.total
+    
+    console.log('[DEBUG] TimeoutWarning.refreshUnsyncedCount - updated count:', unsyncedCount.value)
+  } catch (error) {
+    console.error('Failed to refresh unsynced data count:', error)
+    unsyncedCount.value = 0
+  }
+}
 
 function extendSession() {
   sessionStore.extendSession()
@@ -140,4 +159,16 @@ function dismissWarning() {
   // Note: This is a temporary dismissal, warning will reappear
   sessionStore.showWarning = false
 }
+
+onMounted(() => {
+  // 同期完了イベントを監視
+  syncService.onSyncComplete(refreshUnsyncedCount)
+  syncService.onConflictResolved(refreshUnsyncedCount)
+})
+
+onUnmounted(() => {
+  // イベントリスナーを解除
+  syncService.offSyncComplete(refreshUnsyncedCount)
+  syncService.offConflictResolved(refreshUnsyncedCount)
+})
 </script>

@@ -532,8 +532,10 @@ function formatLastSyncTime(timestamp: number): string {
 
 async function updateUnsyncedDataCount() {
   try {
+    console.log('[DEBUG] SyncSettings.updateUnsyncedDataCount - starting update, sync enabled:', syncStatus.value.isEnabled)
     const { metadataService } = await import('@/services/metadata.service')
     unsyncedDataCount.value = await metadataService.getUnsyncedDataCount(syncStatus.value.isEnabled)
+    console.log('[DEBUG] SyncSettings.updateUnsyncedDataCount - updated count:', unsyncedDataCount.value)
   } catch (error) {
     console.warn('Failed to update unsynced data count:', error)
   }

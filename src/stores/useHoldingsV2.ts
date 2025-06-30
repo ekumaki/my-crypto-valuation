@@ -226,14 +226,81 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
         await metadataService.updateCacheForItem('holding', newHoldingId, holdingMetadata)
         console.log('[DEBUG] addHolding - metadata updated for ID:', newHoldingId)
         
+        // トークンのメタデータも処理する（新しく追加されたトークンの場合）
+        try {
+          const { dbV2 } = await import('@/services/db-v2')
+          const allTokens = await dbV2.tokens.toArray()
+          const tokenForSymbol = allTokens.find(token => token.symbol === holding.symbol)
+          
+          if (tokenForSymbol) {
+            console.log('[DEBUG] addHolding - checking token metadata for:', holding.symbol)
+            
+            // シンボルベースのメタデータをチェック・作成
+            const symbolKey = holding.symbol
+            const existingSymbolMetadata = metadataService.getItemMetadata('token', symbolKey)
+            
+            if (!existingSymbolMetadata || !existingSymbolMetadata.isSynced) {
+              console.log('[DEBUG] addHolding - updating token metadata for symbol:', symbolKey)
+              const tokenMetadata = {
+                isNew: !existingSymbolMetadata,
+                isModified: !!existingSymbolMetadata,
+                isDeleted: false,
+                isSynced: false,
+                lastModified: now,
+                lastSyncTime: null,
+                version: 1
+              }
+              
+              if (!syncEnabled) {
+                (tokenMetadata as any).syncDisabled = true
+              }
+              
+              await metadataService.updateCacheForItem('token', symbolKey, tokenMetadata)
+              console.log('[DEBUG] addHolding - token metadata updated for symbol:', symbolKey)
+            }
+            
+            // IDベースのメタデータも作成（異なる場合のみ）
+            if (tokenForSymbol.id && tokenForSymbol.id !== symbolKey) {
+              const idKey = tokenForSymbol.id
+              const existingIdMetadata = metadataService.getItemMetadata('token', idKey)
+              
+              if (!existingIdMetadata || !existingIdMetadata.isSynced) {
+                console.log('[DEBUG] addHolding - updating token metadata for id:', idKey)
+                const tokenMetadata = {
+                  isNew: !existingIdMetadata,
+                  isModified: !!existingIdMetadata,
+                  isDeleted: false,
+                  isSynced: false,
+                  lastModified: now,
+                  lastSyncTime: null,
+                  version: 1
+                }
+                
+                if (!syncEnabled) {
+                  (tokenMetadata as any).syncDisabled = true
+                }
+                
+                await metadataService.updateCacheForItem('token', idKey, tokenMetadata)
+                console.log('[DEBUG] addHolding - token metadata updated for id:', idKey)
+              }
+            }
+          }
+        } catch (tokenError) {
+          console.warn('[DEBUG] addHolding - token metadata processing failed:', tokenError)
+        }
+        
         // 自動同期を実行（同期有効かつクラウドパスワードがある場合のみ）
         if (syncEnabled) {
           if (syncService.isEnabled.value && syncService.hasCloudPassword.value) {
             console.log('[DEBUG] addHolding - triggering automatic sync')
-            // Don't await sync to avoid blocking the UI
+            // 自動同期を非同期で実行し、結果をログ出力
             syncService.performSync().then(result => {
               if (result.success) {
                 console.log('[DEBUG] addHolding - automatic sync completed successfully')
+                // 同期完了後、未同期件数の更新を確実にするため少し待機
+                setTimeout(() => {
+                  console.log('[DEBUG] addHolding - sync complete, events should have fired')
+                }, 200)
               } else {
                 console.warn('[DEBUG] addHolding - automatic sync failed:', result.message)
                 // Show error toast for sync failures
@@ -249,7 +316,7 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
               }
             })
           } else {
-            console.log('[DEBUG] addHolding - sync not enabled, skipping automatic sync')
+            console.log('[DEBUG] addHolding - sync not enabled or no cloud password, skipping automatic sync')
           }
         }
       } catch (metaError) {
@@ -321,6 +388,10 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
             syncService.performSync().then(result => {
               if (result.success) {
                 console.log('[DEBUG] updateHolding - automatic sync completed successfully')
+                // 同期完了後、未同期件数の更新を確実にするため少し待機
+                setTimeout(() => {
+                  console.log('[DEBUG] updateHolding - sync complete, events should have fired')
+                }, 200)
               } else {
                 console.warn('[DEBUG] updateHolding - automatic sync failed:', result.message)
                 // Show error toast for sync failures
@@ -335,6 +406,8 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
                 window.showToast.error('同期エラー', 'データの自動同期中にエラーが発生しました')
               }
             })
+          } else {
+            console.log('[DEBUG] updateHolding - sync not enabled or no cloud password, skipping automatic sync')
           }
         }
       } catch (metaError) {
@@ -405,6 +478,10 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
             syncService.performSync().then(result => {
               if (result.success) {
                 console.log('[DEBUG] deleteHolding - automatic sync completed successfully')
+                // 同期完了後、未同期件数の更新を確実にするため少し待機
+                setTimeout(() => {
+                  console.log('[DEBUG] deleteHolding - sync complete, events should have fired')
+                }, 200)
               } else {
                 console.warn('[DEBUG] deleteHolding - automatic sync failed:', result.message)
                 // Show error toast for sync failures
@@ -419,6 +496,8 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
                 window.showToast.error('同期エラー', 'データの自動同期中にエラーが発生しました')
               }
             })
+          } else {
+            console.log('[DEBUG] deleteHolding - sync not enabled or no cloud password, skipping automatic sync')
           }
         }
       } catch (metaError) {

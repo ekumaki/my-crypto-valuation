@@ -228,13 +228,25 @@ class MetadataService {
    * Get unsynced data count with caching
    */
   async getUnsyncedDataCount(syncEnabled: boolean = true): Promise<UnsyncedDataCount> {
+    console.log('[DEBUG] getUnsyncedDataCount - called with syncEnabled:', syncEnabled, 'globalSyncTime:', this.globalSyncTime)
+    
     if (this.isCacheValid()) {
-      return this.getCachedCount()
+      const cached = this.getCachedCount()
+      console.log('[DEBUG] getUnsyncedDataCount - returning cached result:', cached)
+      return cached
     }
 
+    console.log('[DEBUG] getUnsyncedDataCount - cache miss, calculating fresh count')
+    
     const holdings = await dbV2.holdings.toArray()
     const locations = await dbV2.locations.toArray()
     const tokens = await dbV2.tokens.toArray()
+
+    console.log('[DEBUG] getUnsyncedDataCount - data loaded:', {
+      holdingsCount: holdings.length,
+      locationsCount: locations.length,
+      tokensCount: tokens.length
+    })
 
     let holdingCount = 0
     let locationCount = 0
@@ -244,6 +256,7 @@ class MetadataService {
     for (const holding of holdings) {
       const metadata = this.getOrCreateMetadata(holding, 'holding')
       if (this.isUnsyncedData(metadata, syncEnabled)) {
+        console.log('[DEBUG] getUnsyncedDataCount - unsynced holding found:', holding.symbol)
         holdingCount++
       }
     }
@@ -252,6 +265,7 @@ class MetadataService {
     for (const location of locations) {
       const metadata = this.getOrCreateMetadata(location, 'location')
       if (this.isUnsyncedData(metadata, syncEnabled)) {
+        console.log('[DEBUG] getUnsyncedDataCount - unsynced location found:', location.name)
         locationCount++
       }
     }
@@ -260,6 +274,7 @@ class MetadataService {
     for (const token of tokens) {
       const metadata = this.getOrCreateMetadata(token, 'token')
       if (this.isUnsyncedData(metadata, syncEnabled)) {
+        console.log('[DEBUG] getUnsyncedDataCount - unsynced token found:', token.symbol)
         tokenCount++
       }
     }
@@ -270,6 +285,8 @@ class MetadataService {
       tokens: tokenCount,
       total: holdingCount + locationCount + tokenCount
     }
+
+    console.log('[DEBUG] getUnsyncedDataCount - final result:', result)
 
     // Cache the result
     this.cacheResult(result)
@@ -480,15 +497,44 @@ class MetadataService {
         await this.updateCacheForItem('token', token.id || token.symbol, syncedMetadata)
       }
 
-      this.clearCache()
+      // 新しく追加されたトークンメタデータも同期済みとしてマーク
+      // キャッシュ内の未同期トークンメタデータをチェック
+      const holdingSymbols = new Set(holdings.map(h => h.symbol))
+      console.log('[DEBUG] markAllAsSynced - checking cached tokens for holdings symbols:', Array.from(holdingSymbols))
       
-      // グローバル同期時刻を設定してキャッシュを確実にクリア
+      for (const [cacheKey, metadata] of this.metadataCache.entries()) {
+        if (cacheKey.startsWith('token_') && !metadata.isSynced) {
+          const tokenIdentifier = cacheKey.replace('token_', '')
+          console.log('[DEBUG] markAllAsSynced - checking cached token:', tokenIdentifier, 'metadata:', metadata)
+          
+          // シンボルベースでチェック（BTC, ETHなど）
+          const isUsedSymbol = holdingSymbols.has(tokenIdentifier)
+          // IDベースでチェック（bitcoin, ethereumなど）
+          const matchingToken = tokens.find(t => t.id === tokenIdentifier)
+          const isUsedId = matchingToken && holdingSymbols.has(matchingToken.symbol)
+          
+          if (isUsedSymbol || isUsedId) {
+            console.log('[DEBUG] markAllAsSynced - marking cached token as synced:', tokenIdentifier)
+            const syncedMetadata = {
+              ...this.markAsSynced(metadata),
+              lastSyncTime: now
+            }
+            delete (syncedMetadata as any).syncDisabled
+            await this.updateCacheForItem('token', tokenIdentifier, syncedMetadata)
+          }
+        }
+      }
+
+      // グローバル同期時刻を設定
       this.setGlobalSyncTime(now)
       
-      // 追加で強制的にキャッシュを無効化
-      this.clearMetadataCache()
+      // キャッシュをクリアするが、すぐに新しい同期済み状態でキャッシュを再構築
+      this.clearCache()
       
-      console.log('[DEBUG] markAllAsSynced - completed successfully with forced cache clear')
+      // 同期完了後、少し待ってからキャッシュを再構築
+      await new Promise(resolve => setTimeout(resolve, 50))
+      
+      console.log('[DEBUG] markAllAsSynced - completed successfully, cache will be rebuilt with synced state')
     } catch (error) {
       console.error('[DEBUG] markAllAsSynced - error:', error)
       throw error

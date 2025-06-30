@@ -1,0 +1,61 @@
+google-auth.service.ts:106 Loading Google Identity Services...
+main.ts:12 [Vue warn]: Unhandled error during execution of setup function 
+  at <App>
+warn$1 @ chunk-5DF355KD.js?v=6d28906a:2123
+logError @ chunk-5DF355KD.js?v=6d28906a:2334
+handleError @ chunk-5DF355KD.js?v=6d28906a:2326
+callWithErrorHandling @ chunk-5DF355KD.js?v=6d28906a:2272
+setupStatefulComponent @ chunk-5DF355KD.js?v=6d28906a:10043
+setupComponent @ chunk-5DF355KD.js?v=6d28906a:10004
+mountComponent @ chunk-5DF355KD.js?v=6d28906a:7334
+processComponent @ chunk-5DF355KD.js?v=6d28906a:7300
+patch @ chunk-5DF355KD.js?v=6d28906a:6816
+render2 @ chunk-5DF355KD.js?v=6d28906a:8120
+mount @ chunk-5DF355KD.js?v=6d28906a:6046
+app.mount @ chunk-5DF355KD.js?v=6d28906a:12290
+(anonymous) @ main.ts:12
+error-handler.service.ts:113 [UNKNOWN] http://localhost:5175/src/stores/session.store.ts?t=1750903685405:285:5: Error: Uncaught ReferenceError: logoutAndDiscardChanges is not defined
+    at error-handler.service.ts:51:9
+handleError @ error-handler.service.ts:113
+(anonymous) @ error-handler.service.ts:50
+session.store.ts:394 Uncaught ReferenceError: logoutAndDiscardChanges is not defined
+    at session.store.ts:394:5
+    at pinia.js?v=f193ed7b:1171:96
+    at EffectScope.run (chunk-5DF355KD.js?v=6d28906a:366:16)
+    at pinia.js?v=f193ed7b:1171:86
+    at EffectScope.run (chunk-5DF355KD.js?v=6d28906a:366:16)
+    at pinia.js?v=f193ed7b:1171:52
+    at runWithContext (chunk-5DF355KD.js?v=6d28906a:6107:18)
+    at createSetupStore (pinia.js?v=f193ed7b:1171:22)
+    at useStore (pinia.js?v=f193ed7b:1369:9)
+    at setup (App.vue:167:22)
+(anonymous) @ session.store.ts:394
+(anonymous) @ pinia.js?v=f193ed7b:1171
+run @ chunk-5DF355KD.js?v=6d28906a:366
+(anonymous) @ pinia.js?v=f193ed7b:1171
+run @ chunk-5DF355KD.js?v=6d28906a:366
+(anonymous) @ pinia.js?v=f193ed7b:1171
+runWithContext @ chunk-5DF355KD.js?v=6d28906a:6107
+createSetupStore @ pinia.js?v=f193ed7b:1171
+useStore @ pinia.js?v=f193ed7b:1369
+setup @ App.vue:167
+callWithErrorHandling @ chunk-5DF355KD.js?v=6d28906a:2270
+setupStatefulComponent @ chunk-5DF355KD.js?v=6d28906a:10043
+setupComponent @ chunk-5DF355KD.js?v=6d28906a:10004
+mountComponent @ chunk-5DF355KD.js?v=6d28906a:7334
+processComponent @ chunk-5DF355KD.js?v=6d28906a:7300
+patch @ chunk-5DF355KD.js?v=6d28906a:6816
+render2 @ chunk-5DF355KD.js?v=6d28906a:8120
+mount @ chunk-5DF355KD.js?v=6d28906a:6046
+app.mount @ chunk-5DF355KD.js?v=6d28906a:12290
+(anonymous) @ main.ts:12
+index.ts:44 [DEBUG] Router guard - navigating to: /login
+storage.service.ts:347 [DEBUG] getAuthState - raw localStorage data: null
+auth.service.ts:234 [DEBUG] authService.isAuthenticated - authState: {isAuthenticated: false}
+index.ts:49 [DEBUG] Router guard - requiresAuth: false isAuthenticated: false
+index.ts:58 [DEBUG] Router guard - allowing navigation
+manifest.json:1 Manifest: Line: 1, column: 1, Syntax error.
+metadata.service.ts:454 [DEBUG] window.clearLegacyData() function available for manual legacy data cleanup
+google-auth.service.ts:112 Google Identity Services loaded
+google-auth.service.ts:118 Google API client loaded successfully
+google-auth.service.ts:85 Google API initialized successfully

@@ -118,11 +118,28 @@ class SyncService {
   }
 
   private emitSyncComplete() {
-    this.eventEmitter.emit('syncComplete')
+    // メタデータ更新とキャッシュ再構築の完了を確実にするために待機
+    setTimeout(async () => {
+      console.log('[DEBUG] emitSyncComplete - firing sync complete event')
+      this.eventEmitter.emit('syncComplete')
+      
+      // 最終的な未同期件数をログ出力
+      try {
+        const { metadataService } = await import('@/services/metadata.service')
+        const finalCount = await metadataService.getUnsyncedDataCount(true)
+        console.log('[DEBUG] emitSyncComplete - final unsynced count after event:', finalCount)
+      } catch (error) {
+        console.error('[DEBUG] emitSyncComplete - failed to get final count:', error)
+      }
+    }, 300)
   }
 
   private emitConflictResolved() {
-    this.eventEmitter.emit('conflictResolved')
+    // メタデータ更新の完了を確実にするために少し待機
+    setTimeout(() => {
+      console.log('[DEBUG] emitConflictResolved - firing conflict resolved event')
+      this.eventEmitter.emit('conflictResolved')
+    }, 100)
   }
   
   /**

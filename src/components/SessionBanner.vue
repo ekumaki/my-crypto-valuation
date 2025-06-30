@@ -145,7 +145,16 @@ function formatSyncTime(timestamp: number): string {
 
 async function checkUnsyncedData() {
   try {
-    unsyncedCount.value = await syncService.getUnsyncedDataCount()
+    // 同期状態を取得
+    const { syncService } = await import('@/services/sync.service')
+    const isSyncEnabled = syncService.isEnabled.value
+    
+    // メタデータサービスから未同期件数を取得
+    const { metadataService } = await import('@/services/metadata.service')
+    const unsyncedData = await metadataService.getUnsyncedDataCount(isSyncEnabled)
+    unsyncedCount.value = unsyncedData.total
+    
+    console.log('[DEBUG] SessionBanner.checkUnsyncedData - updated count:', unsyncedCount.value)
   } catch (error) {
     console.error('Failed to check unsynced data:', error)
     unsyncedCount.value = 0
@@ -214,9 +223,17 @@ function handleClickOutside(event: Event) {
 onMounted(() => {
   document.addEventListener('click', handleClickOutside)
   checkUnsyncedData()
+  
+  // 同期完了イベントを監視
+  syncService.onSyncComplete(checkUnsyncedData)
+  syncService.onConflictResolved(checkUnsyncedData)
 })
 
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
+  
+  // イベントリスナーを解除
+  syncService.offSyncComplete(checkUnsyncedData)
+  syncService.offConflictResolved(checkUnsyncedData)
 })
 </script>
