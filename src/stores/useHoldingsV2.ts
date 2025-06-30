@@ -36,6 +36,48 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
     }
   }
 
+  // Helper function to ensure storage is unlocked
+  async function ensureStorageUnlocked(): Promise<boolean> {
+    try {
+      if (!secureStorage.isUnlocked()) {
+        console.log('[DEBUG] ensureStorageUnlocked - storage is locked, attempting auto unlock...')
+        
+        // Try to restore encryption key from session storage
+        const sessionKeyData = sessionStorage.getItem('encryptionKey')
+        
+        if (sessionKeyData) {
+          try {
+            const { CryptoService } = await import('@/services/crypto.service')
+            const cryptoKey = await CryptoService.importKey(sessionKeyData)
+            secureStorage.setEncryptionKey(cryptoKey)
+            
+            if (secureStorage.isUnlocked()) {
+              console.log('[DEBUG] ensureStorageUnlocked - successfully auto-unlocked with session key')
+              return true
+            }
+          } catch (keyError) {
+            console.error('[DEBUG] ensureStorageUnlocked - failed to import key from session storage:', keyError)
+            // Remove invalid key from session storage
+            sessionStorage.removeItem('encryptionKey')
+          }
+        }
+        
+        // If auto unlock failed, request unlock from user
+        console.log('[DEBUG] ensureStorageUnlocked - auto unlock failed, requesting user unlock...')
+        const { useSessionStore } = await import('@/stores/session.store')
+        const sessionStore = useSessionStore()
+        
+        const unlockSuccess = await sessionStore.requestUnlock()
+        return unlockSuccess && secureStorage.isUnlocked()
+      }
+      
+      return true
+    } catch (error) {
+      console.error('[DEBUG] ensureStorageUnlocked - error:', error)
+      return false
+    }
+  }
+
   async function loadHoldings() {
     try {
       isLoading.value = true
@@ -110,40 +152,9 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
       
       if (syncEnabled) {
         // 同期が有効な場合は暗号化されたストレージを使用
-        if (!secureStorage.isUnlocked()) {
-          console.log('[DEBUG] addHolding - sync enabled but storage is locked, attempting to unlock...')
-          
-          // Check if we're authenticated and can unlock storage
-          const { authService } = await import('@/services/auth.service')
-          const isAuthenticated = await authService.isAuthenticated()
-          console.log('[DEBUG] addHolding - authentication status:', isAuthenticated)
-          
-          if (!isAuthenticated) {
-            throw new Error('Not authenticated - cannot add holding')
-          }
-          
-          // Try to restore encryption key from session
-          try {
-            console.log('[DEBUG] addHolding - attempting to restore encryption key from session...')
-            
-            // Check if we can use the session store to trigger unlock prompt
-            const { useSessionStore } = await import('@/stores/session.store')
-            const sessionStore = useSessionStore()
-            
-            console.log('[DEBUG] addHolding - requesting unlock through session store...')
-            const unlockSuccess = await sessionStore.requestUnlock()
-            
-            if (unlockSuccess && secureStorage.isUnlocked()) {
-              console.log('[DEBUG] addHolding - unlock successful, retrying operation...')
-              // Don't throw error, let the operation continue
-            } else {
-              console.log('[DEBUG] addHolding - unlock failed or cancelled')
-              throw new Error('ストレージのロック解除に失敗しました')
-            }
-          } catch (unlockError) {
-            console.error('[DEBUG] addHolding - failed to unlock storage:', unlockError)
-            throw new Error('ストレージがロックされています。パスワードを再入力してください。')
-          }
+        const storageUnlocked = await ensureStorageUnlocked()
+        if (!storageUnlocked) {
+          throw new Error('ストレージのロック解除に失敗しました')
         }
         
         await secureStorage.addHolding(holding)
@@ -244,14 +255,9 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
       
       if (syncEnabled) {
         // 同期が有効な場合は暗号化されたストレージを使用
-        if (!secureStorage.isUnlocked()) {
-          const { useSessionStore } = await import('@/stores/session.store')
-          const sessionStore = useSessionStore()
-          const unlockSuccess = await sessionStore.requestUnlock()
-          
-          if (!unlockSuccess || !secureStorage.isUnlocked()) {
-            throw new Error('ストレージのロック解除に失敗しました')
-          }
+        const storageUnlocked = await ensureStorageUnlocked()
+        if (!storageUnlocked) {
+          throw new Error('ストレージのロック解除に失敗しました')
         }
         
         await secureStorage.updateHolding(id, updates)
@@ -333,14 +339,9 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
       
       if (syncEnabled) {
         // 同期が有効な場合は暗号化されたストレージを使用
-        if (!secureStorage.isUnlocked()) {
-          const { useSessionStore } = await import('@/stores/session.store')
-          const sessionStore = useSessionStore()
-          const unlockSuccess = await sessionStore.requestUnlock()
-          
-          if (!unlockSuccess || !secureStorage.isUnlocked()) {
-            throw new Error('ストレージのロック解除に失敗しました')
-          }
+        const storageUnlocked = await ensureStorageUnlocked()
+        if (!storageUnlocked) {
+          throw new Error('ストレージのロック解除に失敗しました')
         }
         
         await secureStorage.deleteHolding(id)

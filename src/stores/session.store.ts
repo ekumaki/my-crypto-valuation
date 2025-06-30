@@ -24,6 +24,49 @@ export const useSessionStore = defineStore('session', () => {
     const seconds = totalSeconds % 60
     return `${minutes}:${seconds.toString().padStart(2, '0')}`
   })
+
+  // 暗号化キーの自動復元を試行
+  async function attemptAutoUnlock(): Promise<boolean> {
+    try {
+      const { secureStorage } = await import('@/services/storage.service')
+      
+      if (secureStorage.isUnlocked()) {
+        console.log('[DEBUG] attemptAutoUnlock - storage already unlocked')
+        return true
+      }
+
+      // セッションストレージから暗号化キーを取得
+      const sessionKeyData = sessionStorage.getItem('encryptionKey')
+      
+      if (sessionKeyData) {
+        console.log('[DEBUG] attemptAutoUnlock - found encryption key in session storage, attempting to unlock')
+        
+        try {
+          const { CryptoService } = await import('@/services/crypto.service')
+          const cryptoKey = await CryptoService.importKey(sessionKeyData)
+          secureStorage.setEncryptionKey(cryptoKey)
+          
+          if (secureStorage.isUnlocked()) {
+            console.log('[DEBUG] attemptAutoUnlock - successfully unlocked with session key')
+            return true
+          } else {
+            console.log('[DEBUG] attemptAutoUnlock - session key failed to unlock storage')
+          }
+        } catch (keyError) {
+          console.error('[DEBUG] attemptAutoUnlock - failed to import key from session storage:', keyError)
+          // Remove invalid key from session storage
+          sessionStorage.removeItem('encryptionKey')
+        }
+      } else {
+        console.log('[DEBUG] attemptAutoUnlock - no encryption key found in session storage')
+      }
+
+      return false
+    } catch (error) {
+      console.error('[DEBUG] attemptAutoUnlock - error during auto unlock:', error)
+      return false
+    }
+  }
   
   // セッション開始時間をローカルストレージに保存
   function saveSessionStartTime(time: number) {
@@ -89,12 +132,7 @@ export const useSessionStore = defineStore('session', () => {
         
         // Check if encryption key is in session storage (page refresh case)
         const { secureStorage } = await import('@/services/storage.service')
-        const sessionKey = sessionStorage.getItem('encryptionKey')
-        
-        if (sessionKey) {
-          console.log('[DEBUG] Found encryption key in session storage, attempting to unlock')
-          secureStorage.setEncryptionKey(sessionKey)
-        }
+        await attemptAutoUnlock()
 
         if (!secureStorage.isUnlocked()) {
           console.log('[DEBUG] Authentication exists but storage is locked - showing unlock prompt')
@@ -130,6 +168,20 @@ export const useSessionStore = defineStore('session', () => {
     sessionStartTime.value = Date.now()
     saveSessionStartTime(sessionStartTime.value)
     console.log('[DEBUG] login - new session start time:', new Date(sessionStartTime.value), 'auth type:', authType)
+    
+    // ログイン時に暗号化キーをセッションストレージに保存
+    try {
+      const { secureStorage } = await import('@/services/storage.service')
+      const key = secureStorage.getEncryptionKey()
+      if (key) {
+        const { CryptoService } = await import('@/services/crypto.service')
+        const exportedKey = await CryptoService.exportKey(key)
+        sessionStorage.setItem('encryptionKey', exportedKey)
+        console.log('[DEBUG] login - encryption key exported and saved to session storage')
+      }
+    } catch (error) {
+      console.warn('[DEBUG] login - failed to save encryption key to session storage:', error)
+    }
     
     setupActivityListeners()
     startWarningCountdown()
@@ -417,8 +469,10 @@ export const useSessionStore = defineStore('session', () => {
       const { secureStorage } = await import('@/services/storage.service')
       const key = secureStorage.getEncryptionKey()
       if (key) {
-        sessionStorage.setItem('encryptionKey', key)
-        console.log('[DEBUG] Encryption key saved to session storage')
+        const { CryptoService } = await import('@/services/crypto.service')
+        const exportedKey = await CryptoService.exportKey(key)
+        sessionStorage.setItem('encryptionKey', exportedKey)
+        console.log('[DEBUG] Encryption key exported and saved to session storage')
       }
     } catch (error) {
       console.warn('[DEBUG] Failed to save encryption key to session storage:', error)
@@ -534,6 +588,7 @@ export const useSessionStore = defineStore('session', () => {
     extendSession,
     requestUnlock,
     handleUnlockSuccess,
-    handleUnlockCancel
+    handleUnlockCancel,
+    attemptAutoUnlock
   }
 })

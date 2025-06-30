@@ -391,6 +391,37 @@ class SyncService {
       this._status.value.lastSyncError = null
       console.log('[DEBUG] performSync - starting sync process')
 
+      // Ensure storage is unlocked before sync
+      const { secureStorage } = await import('@/services/storage.service')
+      if (!secureStorage.isUnlocked()) {
+        console.log('[DEBUG] performSync - storage is locked, attempting auto unlock...')
+        
+        // Try to restore encryption key from session storage
+        const sessionKeyData = sessionStorage.getItem('encryptionKey')
+        
+        if (sessionKeyData) {
+          try {
+            const { CryptoService } = await import('@/services/crypto.service')
+            const cryptoKey = await CryptoService.importKey(sessionKeyData)
+            secureStorage.setEncryptionKey(cryptoKey)
+            
+            if (secureStorage.isUnlocked()) {
+              console.log('[DEBUG] performSync - successfully auto-unlocked with session key')
+            }
+          } catch (keyError) {
+            console.error('[DEBUG] performSync - failed to import key from session storage:', keyError)
+            // Remove invalid key from session storage
+            sessionStorage.removeItem('encryptionKey')
+          }
+        }
+        
+        // If still locked, request unlock from user
+        if (!secureStorage.isUnlocked()) {
+          console.log('[DEBUG] performSync - auto unlock failed, sync cannot proceed without unlock')
+          return { success: false, message: 'ストレージがロックされています。データにアクセスするにはパスワードを入力してください。' }
+        }
+      }
+
       // Get current local data and timestamp
       const localData = await this.getLocalData()
       const localTimestamp = await this.getLocalTimestamp()

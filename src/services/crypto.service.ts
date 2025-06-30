@@ -119,6 +119,24 @@ export class CryptoService {
     const { hash } = await this.hashPassword(password, saltBuffer)
     return hash === hashedPassword
   }
+
+  // CryptoKeyをBase64文字列にエクスポート
+  static async exportKey(key: CryptoKey): Promise<string> {
+    const exported = await crypto.subtle.exportKey('raw', key)
+    return this.arrayBufferToBase64(exported)
+  }
+
+  // Base64文字列からCryptoKeyをインポート
+  static async importKey(keyData: string): Promise<CryptoKey> {
+    const keyBuffer = this.base64ToArrayBuffer(keyData)
+    return await crypto.subtle.importKey(
+      'raw',
+      keyBuffer,
+      { name: 'AES-GCM', length: this.KEY_LENGTH },
+      false,
+      ['encrypt', 'decrypt']
+    )
+  }
   
   private static arrayBufferToBase64(buffer: ArrayBuffer): string {
     const bytes = new Uint8Array(buffer)

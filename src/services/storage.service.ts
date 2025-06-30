@@ -21,6 +21,10 @@ export class SecureStorageService {
     this.encryptionKey = key
   }
   
+  getEncryptionKey(): CryptoKey | null {
+    return this.encryptionKey
+  }
+  
   clearEncryptionKey() {
     this.encryptionKey = null
   }
