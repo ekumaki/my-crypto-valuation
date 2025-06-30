@@ -534,9 +534,46 @@ class SyncService {
         return { success: true, message: '同期が完了しました（変更なし）' }
       }
 
-      // データが異なる場合、新規追加データがあるかチェック
+      // ローカルデータが空で未同期データがない場合は、クラウドデータを復元（競合判定をスキップ）
+      const isLocalDataEmpty = (localData.holdings || []).length === 0 && 
+                               (localData.tokens || []).length === 0 && 
+                               (localData.locations || []).length === 0
       const hasNewLocalData = await this.hasNewLocalData()
-      console.log('[DEBUG] performSync - has new local data:', hasNewLocalData)
+      console.log('[DEBUG] performSync - data state check:', {
+        isLocalDataEmpty,
+        hasNewLocalData,
+        cloudHasData: (cloudData.portfolioData.holdings || []).length > 0 || 
+                      (cloudData.portfolioData.tokens || []).length > 0 || 
+                      (cloudData.portfolioData.locations || []).length > 0
+      })
+
+      // ローカルデータが空で未同期データがない場合は、クラウドデータを復元
+      if (isLocalDataEmpty && !hasNewLocalData) {
+        console.log('[DEBUG] performSync - restoring cloud data to empty local storage')
+        
+        // Update local data with cloud data
+        await this.updateLocalData(cloudData.portfolioData)
+        
+        // Update sync status
+        this._status.value.lastSyncTime = Date.now()
+        this._status.value.cloudFileExists = true
+        this.saveSyncStatus()
+        
+        // Mark all restored data as synced
+        const { metadataService } = await import('@/services/metadata.service')
+        await metadataService.markAllAsSynced()
+        console.log('[DEBUG] performSync - cloud data restored successfully, all data marked as synced')
+        
+        // 同期時刻をメタデータサービスにも保存
+        metadataService.setGlobalSyncTime(new Date(this._status.value.lastSyncTime))
+        
+        // キャッシュを強制的にクリアして未同期件数を正しく更新
+        metadataService.clearMetadataCache()
+        console.log('[DEBUG] performSync - metadata cache cleared after cloud data restoration')
+        
+        this.emitSyncComplete()
+        return { success: true, message: 'クラウドデータが復元されました' }
+      }
 
       // 新規データのみの場合は競合ではなく、クラウドに追加する
       if (hasNewLocalData && !this.hasConflictingModifications(localData, cloudData.portfolioData)) {
