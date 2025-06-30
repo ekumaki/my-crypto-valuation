@@ -230,7 +230,9 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
         try {
           const { dbV2 } = await import('@/services/db-v2')
           const allTokens = await dbV2.tokens.toArray()
+          console.log('[DEBUG] addHolding - searching for token with symbol:', holding.symbol, 'in', allTokens.length, 'tokens')
           const tokenForSymbol = allTokens.find(token => token.symbol === holding.symbol)
+          console.log('[DEBUG] addHolding - token found:', tokenForSymbol ? `${tokenForSymbol.symbol} (${tokenForSymbol.id})` : 'not found')
           
           if (tokenForSymbol) {
             console.log('[DEBUG] addHolding - checking token metadata for:', holding.symbol)

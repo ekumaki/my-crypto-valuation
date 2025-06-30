@@ -501,26 +501,35 @@ class MetadataService {
       // キャッシュ内の未同期トークンメタデータをチェック
       const holdingSymbols = new Set(holdings.map(h => h.symbol))
       console.log('[DEBUG] markAllAsSynced - checking cached tokens for holdings symbols:', Array.from(holdingSymbols))
+      console.log('[DEBUG] markAllAsSynced - current cache keys:', Array.from(this.metadataCache.keys()).filter(k => k.startsWith('token_')))
       
       for (const [cacheKey, metadata] of this.metadataCache.entries()) {
-        if (cacheKey.startsWith('token_') && !metadata.isSynced) {
+        if (cacheKey.startsWith('token_')) {
           const tokenIdentifier = cacheKey.replace('token_', '')
-          console.log('[DEBUG] markAllAsSynced - checking cached token:', tokenIdentifier, 'metadata:', metadata)
+          console.log('[DEBUG] markAllAsSynced - found cached token:', tokenIdentifier, 'isSynced:', metadata.isSynced)
           
-          // シンボルベースでチェック（BTC, ETHなど）
-          const isUsedSymbol = holdingSymbols.has(tokenIdentifier)
-          // IDベースでチェック（bitcoin, ethereumなど）
-          const matchingToken = tokens.find(t => t.id === tokenIdentifier)
-          const isUsedId = matchingToken && holdingSymbols.has(matchingToken.symbol)
-          
-          if (isUsedSymbol || isUsedId) {
-            console.log('[DEBUG] markAllAsSynced - marking cached token as synced:', tokenIdentifier)
-            const syncedMetadata = {
-              ...this.markAsSynced(metadata),
-              lastSyncTime: now
+          if (!metadata.isSynced) {
+            console.log('[DEBUG] markAllAsSynced - checking cached token:', tokenIdentifier, 'metadata:', metadata)
+            
+            // シンボルベースでチェック（BTC, ETHなど）
+            const isUsedSymbol = holdingSymbols.has(tokenIdentifier)
+            // IDベースでチェック（bitcoin, ethereumなど）
+            const matchingToken = tokens.find(t => t.id === tokenIdentifier)
+            const isUsedId = matchingToken && holdingSymbols.has(matchingToken.symbol)
+            
+            console.log('[DEBUG] markAllAsSynced - token check:', tokenIdentifier, 'isUsedSymbol:', isUsedSymbol, 'isUsedId:', isUsedId)
+            
+            if (isUsedSymbol || isUsedId) {
+              console.log('[DEBUG] markAllAsSynced - marking cached token as synced:', tokenIdentifier)
+              const syncedMetadata = {
+                ...this.markAsSynced(metadata),
+                lastSyncTime: now
+              }
+              delete (syncedMetadata as any).syncDisabled
+              await this.updateCacheForItem('token', tokenIdentifier, syncedMetadata)
+            } else {
+              console.log('[DEBUG] markAllAsSynced - token not in holdings, skipping:', tokenIdentifier)
             }
-            delete (syncedMetadata as any).syncDisabled
-            await this.updateCacheForItem('token', tokenIdentifier, syncedMetadata)
           }
         }
       }
