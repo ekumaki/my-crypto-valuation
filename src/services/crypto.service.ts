@@ -15,6 +15,44 @@ export class CryptoService {
   private static readonly SALT_LENGTH = 16
   private static readonly IV_LENGTH = 12
   
+  // Google認証情報から暗号化キーを生成
+  static async deriveKeyFromGoogleAuth(userId: string, email: string): Promise<CryptoKey> {
+    const encoder = new TextEncoder()
+    
+    // ユーザーIDとメールアドレスを組み合わせて一意の文字列を作成
+    const uniqueString = `${userId}:${email}:crypto-portfolio-app`
+    const inputBuffer = encoder.encode(uniqueString)
+    
+    // 固定のソルトを生成（ユーザーごとに一意だが再現可能）
+    const saltInput = `salt:${userId}:${email}`
+    const saltBuffer = encoder.encode(saltInput)
+    const saltHash = await crypto.subtle.digest('SHA-256', saltBuffer)
+    const salt = new Uint8Array(saltHash.slice(0, this.SALT_LENGTH))
+    
+    const keyMaterial = await crypto.subtle.importKey(
+      'raw',
+      inputBuffer,
+      { name: 'PBKDF2' },
+      false,
+      ['deriveKey']
+    )
+    
+    const key = await crypto.subtle.deriveKey(
+      {
+        name: 'PBKDF2',
+        salt: salt,
+        iterations: this.ITERATIONS,
+        hash: 'SHA-256'
+      },
+      keyMaterial,
+      { name: 'AES-GCM', length: this.KEY_LENGTH },
+      false,
+      ['encrypt', 'decrypt']
+    )
+    
+    return key
+  }
+  
   static async deriveKey(password: string, salt?: Uint8Array): Promise<KeyDerivationResult> {
     const encoder = new TextEncoder()
     const passwordBuffer = encoder.encode(password)

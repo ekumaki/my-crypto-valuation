@@ -80,13 +80,24 @@ class GoogleDriveApiService {
           if (!retryResponse.ok) {
             throw new Error(`API request failed: ${retryResponse.status}`)
           }
-          return retryResponse.json()
+          // For DELETE requests or empty responses, don't try to parse JSON
+          if (method === 'DELETE' || retryResponse.status === 204) {
+            return {}
+          }
+          const text = await retryResponse.text()
+          return text && text.trim() ? JSON.parse(text) : {}
         }
       }
       throw new Error(`API request failed: ${response.status}`)
     }
 
-    return response.json()
+    // For DELETE requests or empty responses, don't try to parse JSON
+    if (method === 'DELETE' || response.status === 204) {
+      return {}
+    }
+    
+    const text = await response.text()
+    return text && text.trim() ? JSON.parse(text) : {}
   }
 
   private async getOrCreateAppFolder(): Promise<string> {

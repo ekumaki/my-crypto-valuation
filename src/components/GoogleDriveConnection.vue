@@ -200,19 +200,7 @@
       </button>
     </div>
 
-    <!-- Password Setup Modal -->
-    <CloudPasswordSetup
-      v-if="showPasswordSetup"
-      @close="showPasswordSetup = false"
-      @setup-complete="handlePasswordSetup"
-    />
 
-    <!-- Password Prompt Modal -->
-    <CloudPasswordPrompt
-      v-if="showPasswordPrompt"
-      @close="showPasswordPrompt = false"
-      @password-provided="handlePasswordProvided"
-    />
 
     <!-- Conflict Resolver Modal -->
     <ConflictResolver
@@ -232,12 +220,9 @@ import { errorHandlerService } from '@/services/error-handler.service'
 import { useTokensStore } from '@/stores/useTokens'
 import { useHoldingsStoreV2 } from '@/stores/useHoldingsV2'
 import { useLocationsStore } from '@/stores/useLocations'
-import CloudPasswordSetup from './CloudPasswordSetup.vue'
-import CloudPasswordPrompt from './CloudPasswordPrompt.vue'
+
 import ConflictResolver from './ConflictResolver.vue'
 
-const showPasswordSetup = ref(false)
-const showPasswordPrompt = ref(false)
 const showConflictResolver = ref(false)
 const conflictData = ref<SyncConflict | null>(null)
 
@@ -282,43 +267,20 @@ async function signInToGoogle() {
 async function handleEnableSyncClick() {
   try {
     console.log('handleEnableSyncClick called')
-    console.log('Current cloudFileExists:', syncStatus.value.cloudFileExists)
     
-    // Force check for cloud file existence
+    // クラウドファイルの存在確認
     await syncService.checkCloudFileExists()
-    
     const cloudFileExists = syncStatus.value.cloudFileExists
-    console.log('After force check, cloudFileExists:', cloudFileExists)
+    console.log('Cloud file exists:', cloudFileExists)
     
+    let result
     if (cloudFileExists) {
-      console.log('Cloud file exists - showing password prompt')
-      showPasswordPrompt.value = true
+      // 既存ユーザー
+      result = await syncService.enableSync()
     } else {
-      console.log('No cloud file - showing password setup')
-      showPasswordSetup.value = true
+      // 新規ユーザー
+      result = await syncService.enableSyncForNewUser()
     }
-  } catch (error) {
-    console.error('Enable sync check error:', error)
-    errorHandlerService.handleError(error, 'Enable Sync Check', 'error')
-  }
-}
-
-async function signOutFromGoogle() {
-  try {
-    await syncService.disableSync()
-    await googleAuthService.signOut()
-  } catch (error) {
-    errorHandlerService.handleError(error, 'Google Sign Out', 'error')
-  }
-}
-
-async function handlePasswordSetup(password: string) {
-  showPasswordSetup.value = false
-  
-  try {
-    console.log('Enabling sync with password...')
-    const result = await syncService.enableSync(password)
-    console.log('Enable sync result:', result)
     
     if (!result.success) {
       console.error('Enable sync failed:', result.message)
@@ -337,7 +299,6 @@ async function handlePasswordSetup(password: string) {
         holdingsStore.loadAggregatedHoldings(),
         locationsStore.loadLocations()
       ])
-      console.log('Enable sync completed and stores refreshed')
     }
   } catch (error) {
     console.error('Enable sync error:', error)
@@ -345,38 +306,16 @@ async function handlePasswordSetup(password: string) {
   }
 }
 
-async function handlePasswordProvided(password: string) {
-  showPasswordPrompt.value = false
-  
+async function signOutFromGoogle() {
   try {
-    console.log('Testing cloud password for existing data...')
-    const result = await syncService.enableSync(password)
-    console.log('Enable sync result:', result)
-    
-    if (!result.success) {
-      console.error('Enable sync failed:', result.message)
-      if (result.conflictData) {
-        conflictData.value = result.conflictData
-        showConflictResolver.value = true
-      } else {
-        errorHandlerService.handleError(new Error(result.message), 'Enable Sync', 'error')
-      }
-    } else {
-      console.log('Sync enabled successfully from existing cloud data')
-      // Refresh all stores after successful sync enable to update UI
-      await Promise.all([
-        tokensStore.loadTokens(),
-        holdingsStore.loadHoldings(),
-        holdingsStore.loadAggregatedHoldings(),
-        locationsStore.loadLocations()
-      ])
-      console.log('Enable sync completed and stores refreshed')
-    }
+    await syncService.disableSync()
+    await googleAuthService.signOut()
   } catch (error) {
-    console.error('Enable sync error:', error)
-    errorHandlerService.handleError(error, 'Enable Sync', 'error')
+    errorHandlerService.handleError(error, 'Google Sign Out', 'error')
   }
 }
+
+
 
 async function performManualSync() {
   try {

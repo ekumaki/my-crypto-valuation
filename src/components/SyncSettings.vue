@@ -236,19 +236,7 @@
 
 
 
-    <!-- Cloud Password Setup Modal (for enabling sync) -->
-    <CloudPasswordSetup
-      v-if="showPasswordSetup"
-      @close="showPasswordSetup = false"
-      @password-set="handlePasswordSetup"
-    />
 
-    <!-- Cloud Password Prompt Modal (for existing users) -->
-    <CloudPasswordPrompt
-      v-if="showPasswordPrompt"
-      @close="showPasswordPrompt = false"
-      @password-provided="handlePasswordProvided"
-    />
 
     <!-- Conflict Resolver Modal -->
     <ConflictResolver
@@ -266,19 +254,15 @@ import { googleAuthService } from '@/services/google-auth.service'
 import { syncService } from '@/services/sync.service'
 import { errorHandlerService } from '@/services/error-handler.service'
 
-import CloudPasswordSetup from '@/components/CloudPasswordSetup.vue'
-import CloudPasswordPrompt from '@/components/CloudPasswordPrompt.vue'
+
 import ConflictResolver from '@/components/ConflictResolver.vue'
 import { useTokensStore } from '@/stores/useTokens'
 import { useHoldingsStoreV2 } from '@/stores/useHoldingsV2'
 import { useLocationsStore } from '@/stores/useLocations'
 
 // Reactive refs
-const showPasswordSetup = ref(false)
-const showPasswordPrompt = ref(false)
 const showConflictResolver = ref(false)
 const conflictData = ref<any>(null)
-const passwordPromptPurpose = ref<'enable_sync' | 'manual_sync'>('enable_sync')
 const unsyncedDataCount = ref<any>({ holdings: 0, locations: 0, tokens: 0, total: 0 })
 
 // Store instances for refreshing after sync
@@ -314,7 +298,7 @@ async function handleSyncToggle() {
       errorHandlerService.handleError(error, 'Disable Sync', 'error')
     }
   } else {
-    // 同期を有効にする
+    // 同期を有効にする（パスワード不要）
     await enableAutoSync()
   }
 }
@@ -322,35 +306,26 @@ async function handleSyncToggle() {
 async function enableAutoSync() {
   try {
     console.log('enableAutoSync called')
-    console.log('Current cloudFileExists:', syncStatus.value.cloudFileExists)
     
-    // Force check for cloud file existence
-    await syncService.checkCloudFileExists()
-    
-    const cloudFileExists = syncStatus.value.cloudFileExists
-    console.log('After force check, cloudFileExists:', cloudFileExists)
-    
-    if (cloudFileExists) {
-      console.log('Cloud file exists - showing password prompt for sync enable')
-      passwordPromptPurpose.value = 'enable_sync'
-      showPasswordPrompt.value = true
-    } else {
-      console.log('No cloud file - showing password setup')
-      showPasswordSetup.value = true
+    // Google認証チェック
+    if (!authStatus.value.isAuthenticated) {
+      errorHandlerService.handleError(new Error('Google認証が必要です'), 'Enable Sync', 'error')
+      return
     }
-  } catch (error) {
-    console.error('Enable sync check error:', error)
-    errorHandlerService.handleError(error, 'Enable Sync Check', 'error')
-  }
-}
-
-async function handlePasswordSetup(password: string) {
-  showPasswordSetup.value = false
-  
-  try {
-    console.log('Enabling sync with password...')
-    const result = await syncService.enableSync(password)
-    console.log('Enable sync result:', result)
+    
+    // クラウドファイルの存在確認
+    await syncService.checkCloudFileExists()
+    const cloudFileExists = syncStatus.value.cloudFileExists
+    console.log('Cloud file exists:', cloudFileExists)
+    
+    let result
+    if (cloudFileExists) {
+      // 既存ユーザー
+      result = await syncService.enableSync()
+    } else {
+      // 新規ユーザー
+      result = await syncService.enableSyncForNewUser()
+    }
     
     if (!result.success) {
       console.error('Enable sync failed:', result.message)
@@ -363,7 +338,6 @@ async function handlePasswordSetup(password: string) {
     } else {
       console.log('Sync enabled successfully')
       await refreshStores()
-      console.log('Enable sync completed and stores refreshed')
     }
   } catch (error) {
     console.error('Enable sync error:', error)
@@ -371,77 +345,7 @@ async function handlePasswordSetup(password: string) {
   }
 }
 
-async function handlePasswordProvided(password: string) {
-  showPasswordPrompt.value = false
-  
-  try {
-    console.log('Testing cloud password for existing data...', 'Purpose:', passwordPromptPurpose.value)
-    
-    if (passwordPromptPurpose.value === 'enable_sync') {
-      // 自動同期を有効にする場合
-      const result = await syncService.enableSync(password)
-      console.log('Enable sync result:', result)
-      
-      if (!result.success) {
-        console.error('Enable sync failed:', result.message)
-        if (result.conflictData) {
-          conflictData.value = result.conflictData
-          showConflictResolver.value = true
-        } else {
-          errorHandlerService.handleError(new Error(result.message), 'Enable Sync', 'error')
-        }
-      } else {
-        console.log('Sync enabled successfully from existing cloud data')
-        await refreshStores()
-        console.log('Enable sync completed and stores refreshed')
-      }
-    } else {
-      // 手動同期の場合 - 自動同期は有効にしない
-      syncService.setCloudPassword(password)
-      
-      // For manual sync, also ensure local encryption key is set
-      const { authService } = await import('@/services/auth.service')
-      const { secureStorage } = await import('@/services/storage.service')
-      
-      // Check if encryption is unlocked, if not unlock with the password
-      if (!secureStorage.isUnlocked()) {
-        const unlockResult = await authService.unlockWithPassword(password)
-        if (!unlockResult.success) {
-          // If unlock fails, clear incompatible data and setup new key
-          await secureStorage.clearIncompatibleEncryptedData()
-          const setupResult = await authService.setupPassword(password)
-          if (!setupResult.success) {
-            errorHandlerService.handleError(new Error('暗号化キーの設定に失敗しました'), 'Manual Sync Setup', 'error')
-            return
-          }
-        }
-      }
-      
-      const result = await syncService.performSync()
-      if (!result.success) {
-        if (result.conflictData) {
-          conflictData.value = result.conflictData
-          showConflictResolver.value = true
-        } else {
-          errorHandlerService.handleError(new Error(result.message), 'Manual Sync', 'error')
-        }
-      } else {
-        await refreshStores()
-        console.log('Manual sync completed and stores refreshed')
-        
-        // 重要: 手動同期後は自動同期を有効にしない
-        // 自動同期が有効な場合のみタイマーをリセット
-        if (syncStatus.value.isEnabled) {
-          console.log('Resetting auto-sync timer after manual sync')
-          await syncService.resetAutoSyncTimer()
-        }
-      }
-    }
-  } catch (error) {
-    console.error('Password provided error:', error)
-    errorHandlerService.handleError(error, 'Sync Operation', 'error')
-  }
-}
+
 
 async function performManualSync() {
   try {
@@ -451,23 +355,7 @@ async function performManualSync() {
       return
     }
 
-    // 手動同期は自動同期の状態に関係なく実行可能
-    // ただし、クラウドパスワードが必要
-    if (!syncService.hasCloudPassword.value) {
-      // Force check for cloud file existence
-      await syncService.checkCloudFileExists()
-      
-      // クラウドパスワードが設定されていない場合
-      if (syncStatus.value.cloudFileExists) {
-        passwordPromptPurpose.value = 'manual_sync'
-        showPasswordPrompt.value = true
-        return
-      } else {
-        showPasswordSetup.value = true
-        return
-      }
-    }
-
+    // 手動同期を実行（パスワード不要）
     const result = await syncService.performSync()
     if (!result.success) {
       if (result.conflictData) {
@@ -480,16 +368,18 @@ async function performManualSync() {
       await refreshStores()
       console.log('Manual sync completed and stores refreshed')
       
-      // 自動同期が有効な場合、タイマーをリセット/再開
+      // 自動同期が有効な場合のみタイマーをリセット
       if (syncStatus.value.isEnabled) {
         console.log('Resetting auto-sync timer after manual sync')
         await syncService.resetAutoSyncTimer()
       }
     }
   } catch (error) {
+    console.error('Manual sync error:', error)
     errorHandlerService.handleError(error, 'Manual Sync', 'error')
   }
 }
+
 
 
 

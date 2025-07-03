@@ -3,12 +3,7 @@
     <!-- Session Timeout Warning -->
     <TimeoutWarning />
     
-    <!-- Unlock Prompt -->
-    <UnlockPrompt 
-      v-if="sessionStore.showUnlockPrompt"
-      @unlock="sessionStore.handleUnlockSuccess"
-      @cancel="sessionStore.handleUnlockCancel"
-    />
+
     
 
 
@@ -21,7 +16,6 @@
       <!-- Session Banner -->
       <SessionBanner 
         @open-sync-settings="showSyncSettings = true"
-        @open-password-change="handlePasswordChangeRequest"
         @logout-discard="sessionStore.logoutAndDiscardChanges"
       />
       
@@ -121,32 +115,7 @@
       </div>
     </div>
     
-    <!-- Password Change Modal -->
-    <div v-if="showPasswordChange" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full">
-        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-          <div class="flex items-center justify-between">
-            <h3 class="text-lg font-medium text-gray-900 dark:text-white">
-              パスワード変更
-            </h3>
-            <button
-              @click="showPasswordChange = false"
-              class="text-gray-400 hover:text-gray-500 dark:hover:text-gray-300"
-            >
-              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-        </div>
-        <div class="p-6">
-          <CloudPasswordChange
-            @close="showPasswordChange = false"
-            @success="handlePasswordChangeSuccess"
-          />
-        </div>
-      </div>
-    </div>
+
     
     <!-- Conflict Resolver Modal -->
     <ConflictResolver
@@ -165,9 +134,7 @@ import Toast from '@/components/Toast.vue'
 import LoginForm from '@/components/LoginForm.vue'
 import SessionBanner from '@/components/SessionBanner.vue'
 import TimeoutWarning from '@/components/TimeoutWarning.vue'
-import UnlockPrompt from '@/components/UnlockPrompt.vue'
 import SyncSettings from '@/components/SyncSettings.vue'
-import CloudPasswordChange from '@/components/CloudPasswordChange.vue'
 import ConflictResolver from '@/components/ConflictResolver.vue'
 import { useSessionStore } from '@/stores/session.store'
 import { syncService } from '@/services/sync.service'
@@ -176,7 +143,7 @@ const router = useRouter()
 const sessionStore = useSessionStore()
 const isDark = ref(document.documentElement.classList.contains('dark'))
 const showSyncSettings = ref(false)
-const showPasswordChange = ref(false)
+
 
 // Watch for authentication state changes
 watch(() => sessionStore.isAuthenticated, (newValue, oldValue) => {
@@ -201,27 +168,20 @@ function toggleDarkMode() {
   }
 }
 
-function handleLoginSuccess() {
+async function handleLoginSuccess() {
   // Session is already started in LoginForm, just navigate to summary
   console.log('[DEBUG] handleLoginSuccess called - sessionStore.isAuthenticated:', sessionStore.isAuthenticated)
+  
+  // セッション状態の更新を待つ
+  await new Promise(resolve => setTimeout(resolve, 100))
+  
+  console.log('[DEBUG] After wait - sessionStore.isAuthenticated:', sessionStore.isAuthenticated)
   console.log('[DEBUG] About to navigate to /summary')
   router.push('/summary')
   console.log('[DEBUG] Navigation to /summary completed')
 }
 
-function handlePasswordChangeRequest() {
-  // Check if sync is enabled before allowing password change
-  if (!syncService.status.value.isEnabled) {
-    alert('パスワード変更には先に自動同期を有効にする必要があります。同期設定から自動同期を有効にしてください。')
-    return
-  }
-  
-  showPasswordChange.value = true
-}
 
-function handlePasswordChangeSuccess() {
-  showPasswordChange.value = false
-}
 
 function handleConflictClose() {
   // 競合をクリアして閉じる処理は不要（ConflictResolver内で処理される）

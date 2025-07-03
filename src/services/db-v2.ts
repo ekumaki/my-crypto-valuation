@@ -69,6 +69,13 @@ export class CryptoPortfolioDBV2 extends Dexie {
       tokens: 'symbol, name, id'
     })
 
+    this.version(4).stores({
+      locations: 'id, name, type, isCustom, metadata',
+      holdings: 'id, symbol, createdAt, updatedAt, isEncrypted, encryptedQuantity, encryptedLocationId, encryptedNote, metadata',
+      prices: '[symbol+date], symbol, priceJpy, fetchedAt',
+      tokens: 'symbol, name, id, metadata'
+    })
+
     this.on('populate', () => this.populate())
   }
 
@@ -100,6 +107,15 @@ export const dbServiceV2 = {
       isCustom: true
     }
     await dbV2.locations.add(location)
+    
+    // データ変更時の自動同期をトリガー
+    try {
+      const { syncService } = await import('@/services/sync.service')
+      await syncService.triggerSyncOnDataChange()
+    } catch (error) {
+      console.warn('Failed to trigger sync on custom location add:', error)
+    }
+    
     return location
   },
 
@@ -218,6 +234,14 @@ export const dbServiceV2 = {
         name: upperSymbol, // Use symbol as name for unknown tokens
         id: upperSymbol.toLowerCase()
       })
+      
+      // データ変更時の自動同期をトリガー
+      try {
+        const { syncService } = await import('@/services/sync.service')
+        await syncService.triggerSyncOnDataChange()
+      } catch (error) {
+        console.warn('Failed to trigger sync on token ensure:', error)
+      }
     }
   },
 

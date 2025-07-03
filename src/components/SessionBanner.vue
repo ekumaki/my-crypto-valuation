@@ -72,12 +72,7 @@
                 >
                   同期設定
                 </button>
-                <button
-                  @click="openPasswordChange"
-                  class="block w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
-                >
-                  パスワード変更
-                </button>
+
                 <button
                   @click="logout"
                   class="block w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
@@ -110,7 +105,7 @@ import { useSessionStore } from '@/stores/session.store'
 import { syncService } from '@/services/sync.service'
 import LogoutConfirmModal from '@/components/LogoutConfirmModal.vue'
 
-const emit = defineEmits<{ (e: 'open-sync-settings'): void; (e: 'open-password-change'): void; (e: 'logout-discard'): void }>()
+const emit = defineEmits<{ (e: 'open-sync-settings'): void; (e: 'logout-discard'): void }>()
 
 const sessionStore = useSessionStore()
 
@@ -166,10 +161,7 @@ function openSyncSettings() {
   emit('open-sync-settings')
 }
 
-function openPasswordChange() {
-  showDropdown.value = false
-  emit('open-password-change')
-}
+
 
 function logout() {
   showDropdown.value = false
