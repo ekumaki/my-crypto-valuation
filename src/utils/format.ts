@@ -7,7 +7,10 @@ export function formatCurrency(amount: number, currency = 'JPY'): string {
   }).format(Math.floor(amount * 100) / 100)
 }
 
-export function formatNumber(num: number, decimals = 8): string {
+export function formatNumber(num: number | undefined | null, decimals = 8): string {
+  // Guard against undefined, null, or NaN inputs to prevent runtime errors
+  if (num === undefined || num === null || isNaN(num)) return '0'
+
   if (num === 0) return '0'
   
   // For very small numbers, show more decimals
