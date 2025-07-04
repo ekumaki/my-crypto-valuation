@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import SummaryView from '@/views/SummaryView.vue'
 import EditView from '@/views/EditView.vue'
+import ExchangeView from '@/views/ExchangeView.vue'
 import { authService } from '@/services/auth.service'
 
 const router = createRouter({
@@ -24,7 +25,7 @@ const router = createRouter({
       name: 'summary',
       component: SummaryView,
       meta: {
-        title: 'ポートフォリオ',
+        title: '銘柄別',
         requiresAuth: true
       }
     },
@@ -33,7 +34,16 @@ const router = createRouter({
       name: 'edit', 
       component: EditView,
       meta: {
-        title: '保有数量入力',
+        title: '一覧',
+        requiresAuth: true
+      }
+    },
+    {
+      path: '/exchange',
+      name: 'exchange',
+      component: ExchangeView,
+      meta: {
+        title: '取引所別',
         requiresAuth: true
       }
     }

@@ -58,7 +58,7 @@
                 ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400' 
                 : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300'"
             >
-              ポートフォリオ
+              銘柄別
             </router-link>
             <router-link
               to="/edit"
@@ -67,17 +67,17 @@
                 ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400' 
                 : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300'"
             >
-              保有数量入力
+              一覧
             </router-link>
-            <button
-              @click="showSyncSettings = true"
-              class="border-b-2 py-4 px-1 text-sm font-medium transition-colors border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 flex items-center space-x-1"
+            <router-link
+              to="/exchange"
+              class="border-b-2 py-4 px-1 text-sm font-medium transition-colors"
+              :class="$route.name === 'exchange' 
+                ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400' 
+                : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300'"
             >
-              <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                <path d="M5.5 16a3.5 3.5 0 01-.369-6.98 4 4 0 117.753-1.977A4.5 4.5 0 1113.5 16h-8z" />
-              </svg>
-              <span>同期設定</span>
-            </button>
+              取引所別
+            </router-link>
           </div>
         </div>
       </nav>

@@ -187,12 +187,6 @@
             キャンセル
           </button>
           <button
-            @click="handleLogout"
-            class="bg-red-600 hover:bg-red-700 text-white font-medium py-2 px-4 rounded-lg transition-colors"
-          >
-            ログアウト
-          </button>
-          <button
             @click="resolveConflict"
             :disabled="!selectedResolution || isResolving"
             class="flex-1 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white font-medium py-2 px-4 rounded-lg transition-colors disabled:cursor-not-allowed"
@@ -206,10 +200,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
 import { syncService, type SyncConflict } from '@/services/sync.service'
 import { errorHandlerService } from '@/services/error-handler.service'
-import { useSessionStore } from '@/stores/session.store'
 
 interface Props {
   conflictData: SyncConflict
@@ -222,7 +215,6 @@ const emit = defineEmits<{
   resolved: []
 }>()
 
-const sessionStore = useSessionStore()
 const selectedResolution = ref<'local' | 'cloud' | null>(null)
 const isResolving = ref(false)
 
@@ -267,22 +259,6 @@ async function resolveConflict() {
     errorHandlerService.handleError(error, 'Conflict Resolution', 'error')
   } finally {
     isResolving.value = false
-  }
-}
-
-async function handleLogout() {
-  try {
-    console.log('[DEBUG] ConflictResolver.handleLogout() called')
-    
-    // 競合状態をクリアしてからログアウト
-    await syncService.clearConflictState()
-    
-    // 強制的にログアウト
-    await sessionStore.logoutAndDiscardChanges()
-    emit('close')
-  } catch (error) {
-    console.error('Failed to logout from conflict resolver:', error)
-    errorHandlerService.handleError(error, 'Logout', 'error')
   }
 }
 </script>
