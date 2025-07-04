@@ -58,7 +58,7 @@
                 ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400' 
                 : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300'"
             >
-              一覧
+              トークン一覧
             </router-link>
             <router-link
               to="/summary"
@@ -151,8 +151,8 @@ watch(() => sessionStore.isAuthenticated, (newValue, oldValue) => {
   
   // If authentication state changed from false to true, navigate to summary
   if (oldValue === false && newValue === true) {
-    console.log('[DEBUG] Authentication state changed to true, navigating to /summary')
-    router.push('/summary')
+    console.log('[DEBUG] Authentication state changed to true, navigating to /edit')
+    router.push('/edit')
   }
 })
 
@@ -176,9 +176,9 @@ async function handleLoginSuccess() {
   await new Promise(resolve => setTimeout(resolve, 100))
   
   console.log('[DEBUG] After wait - sessionStore.isAuthenticated:', sessionStore.isAuthenticated)
-  console.log('[DEBUG] About to navigate to /summary')
-  router.push('/summary')
-  console.log('[DEBUG] Navigation to /summary completed')
+  console.log('[DEBUG] About to navigate to /edit')
+  router.push('/edit')
+  console.log('[DEBUG] Navigation to /edit completed')
 }
 
 

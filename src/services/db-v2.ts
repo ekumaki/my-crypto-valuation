@@ -76,6 +76,13 @@ export class CryptoPortfolioDBV2 extends Dexie {
       tokens: 'symbol, name, id, metadata'
     })
 
+    this.version(5).stores({
+      locations: 'id, name, type, isCustom, metadata',
+      holdings: 'id, symbol, createdAt, updatedAt, isEncrypted, encryptedQuantity, encryptedLocationId, encryptedNote, metadata',
+      prices: '[symbol+date], symbol, priceJpy, fetchedAt',
+      tokens: 'symbol, name, id, iconUrl, metadata'
+    })
+
     this.on('populate', () => this.populate())
   }
 

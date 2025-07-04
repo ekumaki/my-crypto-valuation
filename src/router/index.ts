@@ -9,7 +9,7 @@ const router = createRouter({
   routes: [
     {
       path: '/',
-      redirect: '/summary'
+      redirect: '/edit'
     },
     {
       path: '/login',
@@ -34,7 +34,7 @@ const router = createRouter({
       name: 'edit', 
       component: EditView,
       meta: {
-        title: '一覧',
+        title: 'トークン一覧',
         requiresAuth: true
       }
     },

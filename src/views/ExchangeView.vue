@@ -49,6 +49,13 @@
               </td>
             </tr>
           </tbody>
+          <!-- Total Footer -->
+          <tfoot v-if="exchangeData.length > 0" class="bg-gray-50 dark:bg-gray-700 font-medium sticky bottom-0">
+            <tr class="border-t border-gray-200 dark:border-gray-600">
+              <td class="px-6 py-4 text-sm text-gray-900 dark:text-white">合計評価額</td>
+              <td class="px-6 py-4 text-right text-lg font-bold text-gray-900 dark:text-white">{{ formatCurrency(totalValue) }}</td>
+            </tr>
+          </tfoot>
         </table>
       </div>
     </div>
@@ -89,6 +96,11 @@
         </div>
       </div>
     </div>
+
+    <!-- Last Update Info -->
+    <div v-if="holdingsStore.lastPriceUpdate" class="text-sm text-gray-500 dark:text-gray-400 text-center">
+      最終更新: {{ formatDate(holdingsStore.lastPriceUpdate) }}
+    </div>
   </div>
 </template>
 
@@ -96,7 +108,7 @@
 import { computed, ref, onMounted } from 'vue'
 import { useHoldingsStoreV2 } from '@/stores/useHoldingsV2'
 import { useLocationsStore } from '@/stores/useLocations'
-import { formatNumber, formatCurrency, formatPercentage } from '@/utils/format'
+import { formatNumber, formatCurrency, formatPercentage, formatDate } from '@/utils/format'
 
 const holdingsStore = useHoldingsStoreV2()
 const locationsStore = useLocationsStore()
@@ -118,8 +130,14 @@ const exchangeData = computed(() => {
     }
     map.get(holding.locationId)!.value += holdingValue
   }
-  return Array.from(map.values()).sort((a, b) => b.value - a.value)
+  const orderMap: Record<string, number> = {}
+  locationsStore.locations.forEach((loc, idx) => {
+    orderMap[loc.id] = idx
+  })
+  return Array.from(map.values()).sort((a, b) => (orderMap[a.locationId] ?? 999) - (orderMap[b.locationId] ?? 999))
 })
+
+const totalValue = computed(() => exchangeData.value.reduce((sum, item) => sum + item.value, 0))
 
 // Breakdown modal states
 const showBreakdownModal = ref(false)

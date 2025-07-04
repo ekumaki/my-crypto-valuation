@@ -3,7 +3,7 @@
     <!-- Header with Add Button -->
     <div class="flex justify-between items-center">
       <h2 class="text-2xl font-bold text-gray-900 dark:text-white">
-        一覧
+        トークン一覧
       </h2>
       
       <button
