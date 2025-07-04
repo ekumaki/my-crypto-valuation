@@ -85,6 +85,15 @@ export const useLocationsStore = defineStore('locations', () => {
       const location = await dbServiceV2.addCustomLocation(name)
       locations.value.push(location)
       console.log('[DEBUG] Added custom location:', location)
+      
+      // データ変更時の自動同期をトリガー
+      try {
+        const { syncService } = await import('@/services/sync.service')
+        await syncService.triggerSyncOnDataChange()
+      } catch (error) {
+        console.warn('Failed to trigger sync on location add:', error)
+      }
+      
       return location
     } catch (err) {
       error.value = 'カスタム場所の追加に失敗しました'

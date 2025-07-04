@@ -25,7 +25,7 @@ export const useSessionStore = defineStore('session', () => {
     return `${minutes}:${seconds.toString().padStart(2, '0')}`
   })
 
-  // 暗号化キーの自動復元を試行
+  // Google認証情報を使用してストレージをアンロック
   async function attemptAutoUnlock(): Promise<boolean> {
     try {
       const { secureStorage } = await import('@/services/storage.service')
@@ -35,51 +35,22 @@ export const useSessionStore = defineStore('session', () => {
         return true
       }
 
-      // セッションストレージから暗号化キーを取得
-      let keyData = sessionStorage.getItem('encryptionKey')
-      let keySource = 'session'
-      
-      // セッションストレージにない場合はローカルストレージから取得
-      if (!keyData) {
-        keyData = localStorage.getItem('encryptionKey')
-        keySource = 'local'
-      }
-      
-      if (keyData) {
-        console.log(`[DEBUG] attemptAutoUnlock - found encryption key in ${keySource} storage, attempting to unlock`)
-        
-        try {
-          const { CryptoService } = await import('@/services/crypto.service')
-          const cryptoKey = await CryptoService.importKey(keyData)
-          secureStorage.setEncryptionKey(cryptoKey)
-          
-          if (secureStorage.isUnlocked()) {
-            console.log(`[DEBUG] attemptAutoUnlock - successfully unlocked with ${keySource} key`)
-            
-            // セッションストレージにキーがない場合は保存
-            if (keySource === 'local' && !sessionStorage.getItem('encryptionKey')) {
-              sessionStorage.setItem('encryptionKey', keyData)
-              console.log('[DEBUG] attemptAutoUnlock - restored key to session storage')
-            }
-            
-            return true
-          } else {
-            console.log(`[DEBUG] attemptAutoUnlock - ${keySource} key failed to unlock storage`)
-          }
-        } catch (keyError) {
-          console.error(`[DEBUG] attemptAutoUnlock - failed to import key from ${keySource} storage:`, keyError)
-          // Remove invalid key
-          if (keySource === 'session') {
-            sessionStorage.removeItem('encryptionKey')
-          } else {
-            localStorage.removeItem('encryptionKey')
-          }
-        }
-      } else {
-        console.log('[DEBUG] attemptAutoUnlock - no encryption key found in session or local storage')
+      // Google認証状態をチェック
+      const { googleAuthService } = await import('@/services/google-auth.service')
+      if (!googleAuthService.isAuthenticated.value || !googleAuthService.user.value) {
+        console.log('[DEBUG] attemptAutoUnlock - not authenticated with Google')
+        return false
       }
 
-      return false
+      // Google認証情報から暗号化キーを復元
+      const unlockResult = await authService.unlockWithGoogleAuth()
+      if (unlockResult.success) {
+        console.log('[DEBUG] attemptAutoUnlock - successfully unlocked with Google auth')
+        return true
+      } else {
+        console.log('[DEBUG] attemptAutoUnlock - failed to unlock with Google auth:', unlockResult.error)
+        return false
+      }
     } catch (error) {
       console.error('[DEBUG] attemptAutoUnlock - error during auto unlock:', error)
       return false
@@ -188,19 +159,17 @@ export const useSessionStore = defineStore('session', () => {
     saveSessionStartTime(sessionStartTime.value)
     console.log('[DEBUG] login - new session start time:', new Date(sessionStartTime.value), 'auth type:', authType)
     
-    // ログイン時に暗号化キーをセッションストレージとローカルストレージに保存
+    // Google認証情報から暗号化キーが設定されていることを確認
     try {
       const { secureStorage } = await import('@/services/storage.service')
-      const key = secureStorage.getEncryptionKey()
-      if (key) {
-        const { CryptoService } = await import('@/services/crypto.service')
-        const exportedKey = await CryptoService.exportKey(key)
-        sessionStorage.setItem('encryptionKey', exportedKey)
-        localStorage.setItem('encryptionKey', exportedKey)
-        console.log('[DEBUG] login - encryption key exported and saved to session and local storage')
+      if (secureStorage.isUnlocked()) {
+        console.log('[DEBUG] login - storage is unlocked and ready')
+      } else {
+        console.log('[DEBUG] login - storage is not unlocked, attempting auto unlock')
+        await attemptAutoUnlock()
       }
     } catch (error) {
-      console.warn('[DEBUG] login - failed to save encryption key to storage:', error)
+      console.error('[DEBUG] login - failed to verify storage state:', error)
     }
     
     setupActivityListeners()
@@ -217,8 +186,7 @@ export const useSessionStore = defineStore('session', () => {
     isAuthenticated.value = false
     sessionStartTime.value = 0
     clearSessionStartTime() // ローカルストレージからも削除
-    sessionStorage.removeItem('encryptionKey') // セッションストレージからキーを削除
-    localStorage.removeItem('encryptionKey') // ローカルストレージからキーを削除
+
     await authService.logout()
   }
 
@@ -254,7 +222,8 @@ export const useSessionStore = defineStore('session', () => {
         'lastDataModified',
         'syncStatus',
         'globalSyncTime',
-        'cloudPassword'
+        'cloudPassword',
+        'encryptionKey'  // 暗号化キーもクリア
       ]
       
       for (const key of syncKeys) {
@@ -262,9 +231,14 @@ export const useSessionStore = defineStore('session', () => {
         console.log('[DEBUG] performAdditionalCleanup - removed localStorage key:', key)
       }
       
-      // メタデータサービスの状態をリセット
+      // セッションストレージもクリア
+      sessionStorage.removeItem('encryptionKey')
+      console.log('[DEBUG] performAdditionalCleanup - cleared session storage')
+      
+      // メタデータサービスの状態を完全にリセット
       const { metadataService } = await import('@/services/metadata.service')
       metadataService.clearMetadataCache()
+      await metadataService.forceResetAllMetadata()
       
       console.log('[DEBUG] performAdditionalCleanup - completed')
     } catch (error) {

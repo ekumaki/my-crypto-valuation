@@ -85,32 +85,14 @@
         </div>
       </div>
     </div>
-
-          <!-- Password Setup Modal -->
-      <CloudPasswordSetup
-        v-if="showPasswordSetup"
-        @setupComplete="handlePasswordSetup"
-        @close="handlePasswordSetupClose"
-      />
-  
-      <!-- Password Prompt Modal -->
-      <CloudPasswordPrompt
-        v-if="showPasswordPrompt"
-        @passwordProvided="handlePasswordAuth"
-        @close="handlePasswordPromptClose"
-        @forgotPassword="handleForgotPassword"
-      />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
 import { googleAuthService } from '@/services/google-auth.service'
 import { authService } from '@/services/auth.service'
-import CloudPasswordSetup from '@/components/CloudPasswordSetup.vue'
-import CloudPasswordPrompt from '@/components/CloudPasswordPrompt.vue'
 import { syncService } from '@/services/sync.service'
-import { dbServiceV2, dbV2 } from '@/services/db-v2'
 
 const emit = defineEmits<{
   loginSuccess: []
@@ -119,8 +101,6 @@ const emit = defineEmits<{
 const isLoading = ref(false)
 const error = ref('')
 const showResetConfirm = ref(false)
-const showPasswordSetup = ref(false)
-const showPasswordPrompt = ref(false)
 
 async function handleGoogleAuth() {
   if (isLoading.value) return
@@ -129,221 +109,43 @@ async function handleGoogleAuth() {
   isLoading.value = true
   
   try {
-    // 統合認証フローを実行
+    // Google認証を実行
     const userType = await googleAuthService.authenticateAndInitialize()
     
-    if (userType === 'existing_user') {
-      // 既存ユーザー: パスワード入力画面を表示
-      showPasswordPrompt.value = true
-    } else {
-      // 新規ユーザー: パスワード設定画面を表示
-      showPasswordSetup.value = true
+    // Google認証情報から暗号化キーを設定
+    const setupResult = await authService.setupEncryptionFromGoogleAuth()
+    if (!setupResult.success) {
+      throw new Error(setupResult.error || '暗号化キーの設定に失敗しました')
     }
+
+    // セッションストアを手動で更新
+    const { useSessionStore } = await import('@/stores/session.store')
+    const sessionStore = useSessionStore()
+    await sessionStore.login('google')
+    console.log('[DEBUG] Session started, isAuthenticated:', sessionStore.isAuthenticated)
+
+    // 同期を有効化
+    let syncResult
+    if (userType === 'existing_user') {
+      syncResult = await syncService.enableSync()
+    } else {
+      syncResult = await syncService.enableSyncForNewUser()
+    }
+    
+    if (!syncResult.success) {
+      console.warn('Sync enablement failed:', syncResult.message)
+      // 同期失敗でもログインは継続
+    }
+
+    // ログイン成功
+    console.log('[DEBUG] Emitting loginSuccess from handleGoogleAuth')
+    emit('loginSuccess')
   } catch (err: any) {
     console.error('Google authentication failed:', err)
-    error.value = googleAuthService.error.value || '認証に失敗しました'
+    error.value = err.message || googleAuthService.error.value || '認証に失敗しました'
   } finally {
     isLoading.value = false
   }
-}
-
-async function handlePasswordSetup(password: string) {
-  try {
-    isLoading.value = true
-    error.value = ''
-
-    // Enable sync for new user (without trying to read encrypted data)
-    const syncResult = await syncService.enableSyncForNewUser(password)
-    if (!syncResult.success) {
-      throw new Error(syncResult.message)
-    }
-
-    // Initialize the app session with the password for new users
-    await initializeAppSession(password, true)
-    
-    showPasswordSetup.value = false
-    console.log('[DEBUG] Emitting loginSuccess from handlePasswordSetup')
-    emit('loginSuccess')
-  } catch (err) {
-    console.error('Password setup failed:', err)
-    error.value = err instanceof Error ? err.message : 'パスワードの設定に失敗しました'
-  } finally {
-    isLoading.value = false
-  }
-}
-
-async function handlePasswordAuth(password: string) {
-  try {
-    isLoading.value = true
-    error.value = ''
-
-    // Test the cloud password
-    const isValidPassword = await syncService.testCloudPassword(password)
-    if (!isValidPassword) {
-      throw new Error('パスワードが正しくありません')
-    }
-
-    // Initialize the app session with the password for existing users FIRST
-    // This will unlock the storage before we try to sync
-    await initializeAppSession(password, false)
-
-    // Enable sync with the authenticated password AFTER storage is unlocked
-    const syncResult = await syncService.enableSync(password)
-    if (!syncResult.success) {
-      // Check if this is a conflict error
-      if (syncResult.message === '同期競合が検出されました' && syncResult.conflictData) {
-        // Show conflict resolver instead of throwing error
-        showPasswordPrompt.value = false
-        // Store conflict data for potential future use
-        console.log('[DEBUG] Sync conflict detected, conflict data:', syncResult.conflictData)
-        // For now, we'll continue with the login and let the user handle the conflict later
-        // The conflict will be available in the sync service status
-      } else {
-        throw new Error(syncResult.message)
-      }
-    }
-    
-    showPasswordPrompt.value = false
-    console.log('[DEBUG] Emitting loginSuccess from handlePasswordAuth')
-    emit('loginSuccess')
-  } catch (err) {
-    console.error('Password authentication failed:', err)
-    error.value = err instanceof Error ? err.message : 'パスワードの認証に失敗しました'
-  } finally {
-    isLoading.value = false
-  }
-}
-
-async function initializeAppSession(password?: string, isNewUser: boolean = false) {
-  try {
-    // Import required services
-    const { useSessionStore } = await import('@/stores/session.store')
-    const { secureStorage } = await import('@/services/storage.service')
-    const { authService } = await import('@/services/auth.service')
-    const { nextTick } = await import('vue')
-
-    // Get the session store instance
-    const sessionStore = useSessionStore()
-
-    // Set up encryption key based on user type
-    if (password && !secureStorage.isUnlocked()) {
-      if (isNewUser) {
-        console.log('Setting up encryption key for new user')
-        const setupResult = await authService.setupPassword(password)
-        if (!setupResult.success) {
-          throw new Error(setupResult.error || 'パスワード設定に失敗しました')
-        }
-        console.log('[DEBUG] New user password setup completed, storage unlocked:', secureStorage.isUnlocked())
-      } else {
-        console.log('Unlocking storage for existing user')
-        const unlockResult = await authService.unlockWithPassword(password)
-        if (!unlockResult.success) {
-          throw new Error(unlockResult.error || 'パスワードでのロック解除に失敗しました')
-        }
-        console.log('[DEBUG] Existing user unlock completed, storage unlocked:', secureStorage.isUnlocked())
-      }
-    } else if (secureStorage.isUnlocked()) {
-      console.log('[DEBUG] Storage is already unlocked')
-    } else {
-      console.log('[DEBUG] No password provided or other condition not met')
-    }
-
-    // Start session with Google Drive authentication
-    await sessionStore.login('google-drive')
-    
-    // Ensure secure storage is unlocked
-    if (!secureStorage.isUnlocked()) {
-      throw new Error('セキュアストレージのロックが解除されていません')
-    }
-
-    // For new users, ensure database is properly initialized
-    if (isNewUser) {
-      console.log('Initializing database for new user...')
-      console.log('[DEBUG] Storage unlocked status before DB test:', secureStorage.isUnlocked())
-      
-      try {
-        // Clear existing encrypted data for new user to prevent key conflicts
-        console.log('[DEBUG] Clearing existing encrypted data for new user...')
-        await secureStorage.clearAllDataForNewUser()
-        console.log('[DEBUG] Existing data cleared successfully')
-        
-        // Test basic database connectivity
-        console.log('[DEBUG] Testing basic database connectivity...')
-        // Test database connectivity by accessing tables
-        console.log('[DEBUG] Database opened successfully')
-        
-        // Check table counts
-        const locationCount = await dbV2.locations.count()
-        const holdingCount = await dbV2.holdings.count()
-        console.log('[DEBUG] Database table counts - locations:', locationCount, 'holdings:', holdingCount)
-        
-        // Test data access with new encryption key
-        const testHoldings = await secureStorage.getHoldings()
-        console.log('[DEBUG] Successfully accessed holdings with new key, count:', testHoldings.length)
-        
-      } catch (error) {
-        console.log('Database initialization failed:', error)
-        console.log('Error name:', error.name)
-        console.log('Error message:', error.message)
-        console.log('Error stack:', error.stack)
-        
-        // Try to close and reopen database
-        try {
-          console.log('[DEBUG] Attempting to close and reopen database...')
-          await dbV2.close()
-          await dbV2.open()
-          console.log('[DEBUG] Database reopened successfully')
-          
-          // Clear all data after reopening
-          await secureStorage.clearAllDataForNewUser()
-          const testHoldings = await secureStorage.getHoldings()
-          console.log('[DEBUG] Data cleared and tested successfully')
-          
-        } catch (reopenError) {
-          console.log('Database reopen failed:', reopenError)
-          
-          // Try clearing data as last resort
-          try {
-            await secureStorage.clearAllDataForNewUser()
-            console.log('Database clear completed')
-            const testHoldings = await secureStorage.getHoldings()
-            console.log('[DEBUG] Clear completed successfully')
-            
-          } catch (clearError) {
-            console.log('Database clear failed:', clearError)
-          }
-        }
-      }
-    }
-
-    console.log('App session initialized successfully')
-    console.log('[DEBUG] sessionStore.isAuthenticated after login:', sessionStore.isAuthenticated)
-    console.log('[DEBUG] About to emit loginSuccess')
-    
-    // Ensure Vue reactivity system has processed the changes
-    await nextTick()
-  } catch (err) {
-    console.error('Failed to initialize app session:', err)
-    throw new Error('アプリセッションの初期化に失敗しました')
-  }
-}
-
-function handlePasswordSetupClose() {
-  showPasswordSetup.value = false
-  error.value = ''
-  // Allow user to retry Google authentication if needed
-}
-
-function handlePasswordPromptClose() {
-  showPasswordPrompt.value = false
-  error.value = ''
-  // Allow user to retry Google authentication if needed
-}
-
-function handleForgotPassword() {
-  showPasswordPrompt.value = false
-  showPasswordSetup.value = true
-  // Switch to password setup for resetting cloud password
 }
 
 async function handleReset() {
@@ -358,128 +160,57 @@ async function handleReset() {
         const { googleDriveApiService } = await import('@/services/google-drive-api.service')
         console.log('[RESET] Google Drive API service imported')
         
-        // まず現在のアプリフォルダ内の全ファイルを確認
-        console.log('[RESET] Listing all files in app folder...')
-        const allFiles = await googleDriveApiService.listFiles()
-        console.log('[RESET] All files in app folder:', allFiles.map(f => ({ name: f.name, id: f.id, mimeType: f.mimeType })))
-        
-        // 複数回試行してファイルを見つけて削除
-        let retryCount = 0
-        const maxRetries = 3
-        let filesDeleted = false
-        
-        while (retryCount < maxRetries && !filesDeleted) {
-          try {
-            console.log(`[RESET] Deletion attempt ${retryCount + 1}/${maxRetries}`)
-            
-            // 特定のバックアップファイルを探す
-            const backupFile = await googleDriveApiService.findBackupFile()
-            if (backupFile) {
-              console.log('[RESET] Found backup file:', backupFile.name, 'ID:', backupFile.id)
-              await googleDriveApiService.deleteFile(backupFile.id)
-              console.log('[RESET] Backup file deleted successfully')
-              filesDeleted = true
-            } else {
-              console.log('[RESET] No specific backup file found, checking all JSON files...')
-            }
-            
-            // 全てのJSONファイルを削除（バックアップファイルが見つからない場合も含む）
-            const jsonFiles = allFiles.filter(f => 
-              f.name.endsWith('.json') || 
-              f.name.includes('portfolio') || 
-              f.name.includes('backup') ||
-              f.mimeType === 'application/json'
-            )
-            
-            console.log('[RESET] JSON/backup files found:', jsonFiles.map(f => ({ name: f.name, id: f.id })))
-            
-            if (jsonFiles.length > 0) {
-              for (const file of jsonFiles) {
-                try {
-                  console.log('[RESET] Deleting file:', file.name, 'ID:', file.id)
-                  await googleDriveApiService.deleteFile(file.id)
-                  console.log('[RESET] File deleted successfully:', file.name)
-                  filesDeleted = true
-                } catch (deleteError) {
-                  console.error('[RESET] Failed to delete file:', file.name, deleteError)
-                }
-              }
-            }
-            
-            // 削除後に再度ファイルリストを確認
-            console.log('[RESET] Verifying deletion...')
-            const remainingFiles = await googleDriveApiService.listFiles()
-            console.log('[RESET] Remaining files after deletion:', remainingFiles.map(f => ({ name: f.name, id: f.id })))
-            
-            if (filesDeleted || remainingFiles.length === 0) {
-              console.log('[RESET] File deletion completed')
-              break
-            }
-            
-          } catch (retryError) {
-            console.warn(`[RESET] Google Drive file deletion attempt ${retryCount + 1} failed:`, retryError)
-            retryCount++
-            if (retryCount >= maxRetries) {
-              throw retryError
-            }
-            // 少し待ってからリトライ
-            await new Promise(resolve => setTimeout(resolve, 1000))
-          }
+        // バックアップファイルを削除
+        const backupFile = await googleDriveApiService.findBackupFile()
+        if (backupFile) {
+          console.log('[RESET] Found backup file:', backupFile.name, 'ID:', backupFile.id)
+          await googleDriveApiService.deleteFile(backupFile.id)
+          console.log('[RESET] Backup file deleted successfully')
+        } else {
+          console.log('[RESET] No backup file found')
         }
-        
-        if (!filesDeleted) {
-          console.warn('[RESET] No files were deleted after all attempts')
-        }
-        
       } else {
-        console.log('[RESET] Not authenticated with Google, skipping Drive file deletion')
+        console.log('[RESET] Not authenticated with Google, skipping Google Drive cleanup')
       }
     } catch (error) {
-      console.error('[RESET] Google Drive file deletion failed:', error)
-      // Continue with local reset even if cloud deletion fails
+      console.warn('[RESET] Failed to delete Google Drive files:', error)
+      // Continue with local cleanup even if Google Drive cleanup fails
     }
     
-    // Google認証状態をクリア
+    // 同期サービスを無効化
+    try {
+      await syncService.disableSync()
+      console.log('[RESET] Sync service disabled')
+    } catch (error) {
+      console.warn('[RESET] Failed to disable sync service:', error)
+    }
+    
+    // Google認証をクリア
     try {
       await googleAuthService.signOut()
+      console.log('[RESET] Google authentication cleared')
     } catch (error) {
-      console.warn('Google sign out failed:', error)
+      console.warn('[RESET] Failed to clear Google authentication:', error)
     }
     
-    // ローカルストレージを完全クリア
-    localStorage.clear()
-    sessionStorage.clear()
-    
-    // IndexedDBを削除
+    // 全データをクリア
     try {
-      await deleteDatabase('CryptoPortfolioDB')
-      await deleteDatabase('CryptoPortfolioDBV2')
+      await authService.resetAndClearData()
+      console.log('[RESET] All local data cleared')
     } catch (error) {
-      console.warn('IndexedDB deletion failed:', error)
+      console.warn('[RESET] Failed to clear some data:', error)
+      // Continue anyway - the force reset should have handled most cases
     }
     
+    // モーダルを閉じる
     showResetConfirm.value = false
-    error.value = ''
     
-    console.log('Reset completed successfully')
-    
-    // ページをリロードして初期状態に戻す
+    // ページをリロード
     window.location.reload()
-  } catch (error: any) {
-    console.error('Reset failed:', error)
-    error.value = 'リセットに失敗しました'
+  } catch (error) {
+    console.error('[RESET] Reset failed:', error)
+    error.value = 'リセットに失敗しました: ' + (error instanceof Error ? error.message : 'Unknown error')
+    showResetConfirm.value = false
   }
-}
-
-function deleteDatabase(dbName: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const deleteReq = indexedDB.deleteDatabase(dbName)
-    deleteReq.onsuccess = () => resolve()
-    deleteReq.onerror = () => reject(deleteReq.error)
-    deleteReq.onblocked = () => {
-      console.warn(`IndexedDB ${dbName} deletion blocked`)
-      resolve() // Continue anyway
-    }
-  })
 }
 </script>

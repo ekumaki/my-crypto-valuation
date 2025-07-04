@@ -258,9 +258,17 @@ class GoogleAuthService {
       this._isLoading.value = true
       this._error.value = null
 
-      if (this.authInstance) {
-        await this.authInstance.signOut()
+      // アクセストークンがある場合はそれを無効化
+      if (this.accessToken && (window as any).google?.accounts?.oauth2) {
+        try {
+          (window as any).google.accounts.oauth2.revoke(this.accessToken)
+        } catch (error) {
+          console.warn('Token revocation failed:', error)
+        }
       }
+
+      // 認証状態をクリア
+      this.handleSignOut()
     } catch (error) {
       console.error('Sign out failed:', error)
       this._error.value = 'サインアウトに失敗しました'

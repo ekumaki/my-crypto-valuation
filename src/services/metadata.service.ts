@@ -264,7 +264,10 @@ class MetadataService {
     // Count unsynced locations
     for (const location of locations) {
       const metadata = this.getOrCreateMetadata(location, 'location')
-      if (this.isUnsyncedData(metadata, syncEnabled)) {
+      const isPreset = this.isPresetData(location, 'location')
+      const isUnsynced = this.isUnsyncedData(metadata, syncEnabled)
+      console.log('[DEBUG] getUnsyncedDataCount - location:', location.name, 'isPreset:', isPreset, 'isUnsynced:', isUnsynced, 'metadata:', metadata)
+      if (isUnsynced) {
         console.log('[DEBUG] getUnsyncedDataCount - unsynced location found:', location.name)
         locationCount++
       }
@@ -273,7 +276,10 @@ class MetadataService {
     // Count unsynced tokens
     for (const token of tokens) {
       const metadata = this.getOrCreateMetadata(token, 'token')
-      if (this.isUnsyncedData(metadata, syncEnabled)) {
+      const isPreset = this.isPresetData(token, 'token')
+      const isUnsynced = this.isUnsyncedData(metadata, syncEnabled)
+      console.log('[DEBUG] getUnsyncedDataCount - token:', token.symbol, 'isPreset:', isPreset, 'isUnsynced:', isUnsynced, 'metadata:', metadata)
+      if (isUnsynced) {
         console.log('[DEBUG] getUnsyncedDataCount - unsynced token found:', token.symbol)
         tokenCount++
       }
@@ -349,6 +355,32 @@ class MetadataService {
   }
 
   /**
+   * Check if an item is preset data
+   */
+  private isPresetData(item: any, type: string): boolean {
+    if (type === 'location') {
+      const presetLocationIds = [
+        'bitflyer', 'coincheck', 'bitbank', 'gmo-coin', 'sbi-vc',
+        'binance', 'coinbase', 'kraken', 'bybit', 'okx',
+        'metamask', 'trust-wallet', 'phantom', 'keplr', 'backpack',
+        'ledger', 'trezor'
+      ]
+      return presetLocationIds.includes(item.id)
+    }
+    
+    if (type === 'token') {
+      const presetTokenSymbols = [
+        'BTC', 'ETH', 'BNB', 'ADA', 'SOL', 'XRP', 'DOT', 'DOGE', 
+        'AVAX', 'SHIB', 'MATIC', 'LTC', 'ATOM', 'LINK', 'UNI'
+      ]
+      return presetTokenSymbols.includes(item.symbol)
+    }
+    
+    // Holdings are never preset data
+    return false
+  }
+
+  /**
    * Get or create metadata for an item
    */
   private getOrCreateMetadata(item: any, type: string): SyncMetadata {
@@ -376,7 +408,17 @@ class MetadataService {
     
     // For items that exist in the database but have no metadata, 
     // we need to determine if they're pre-existing or new
-    if (this.globalSyncTime) {
+    
+    // プリセットデータかどうかをチェック
+    const isPresetData = this.isPresetData(item, type)
+    
+    if (isPresetData) {
+      // プリセットデータは常に同期済みとして扱う
+      defaultMetadata.isNew = false
+      defaultMetadata.isSynced = true
+      defaultMetadata.lastSyncTime = this.globalSyncTime || new Date()
+      defaultMetadata.lastModified = this.globalSyncTime || new Date()
+    } else if (this.globalSyncTime) {
       // If we have a global sync time, items created before that time are considered synced
       const itemTimestamp = item.createdAt || item.updatedAt || 0
       if (itemTimestamp > 0 && itemTimestamp <= this.globalSyncTime.getTime()) {
@@ -606,7 +648,7 @@ class MetadataService {
         { id: 'backpack', name: 'Backpack', type: 'sw_wallet' as const, isCustom: false },
         { id: 'ledger', name: 'Ledger', type: 'hw_wallet' as const, isCustom: false },
         { id: 'trezor', name: 'Trezor', type: 'hw_wallet' as const, isCustom: false }
-    ].map((location: any) => ({ ...location, metadata: createInitialMetadata() }))
+    ]
 
     // Populate with preset tokens
     const presetTokens = [
@@ -625,10 +667,19 @@ class MetadataService {
         { symbol: 'ATOM', name: 'Cosmos', id: 'cosmos' },
         { symbol: 'LINK', name: 'Chainlink', id: 'chainlink' },
         { symbol: 'UNI', name: 'Uniswap', id: 'uniswap' }
-    ].map((token: any) => ({ ...token, metadata: createInitialMetadata() }))
+    ]
 
+    // Add locations and then update with metadata
     await dbV2.locations.bulkAdd(presetLocations)
+    for (const location of presetLocations) {
+      await this.updateCacheForItem('location', location.id, createInitialMetadata())
+    }
+
+    // Add tokens and then update with metadata
     await dbV2.tokens.bulkAdd(presetTokens)
+    for (const token of presetTokens) {
+      await this.updateCacheForItem('token', token.symbol, createInitialMetadata())
+    }
 
     // Set the global sync time to ensure everything is marked as synced
     this.setGlobalSyncTime(new Date())

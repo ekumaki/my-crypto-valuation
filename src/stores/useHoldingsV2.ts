@@ -291,12 +291,12 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
           console.warn('[DEBUG] addHolding - token metadata processing failed:', tokenError)
         }
         
-        // 自動同期を実行（同期有効かつクラウドパスワードがある場合のみ）
+        // 自動同期を実行（同期有効な場合のみ）
         if (syncEnabled) {
-          if (syncService.isEnabled.value && syncService.hasCloudPassword.value) {
+          if (syncService.isEnabled.value) {
             console.log('[DEBUG] addHolding - triggering automatic sync')
             // 自動同期を非同期で実行し、結果をログ出力
-            syncService.performSync().then(result => {
+            syncService.performSync({ skipConflictDetection: true }).then(result => {
               if (result.success) {
                 console.log('[DEBUG] addHolding - automatic sync completed successfully')
                 // 同期完了後、未同期件数の更新を確実にするため少し待機
@@ -318,7 +318,7 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
               }
             })
           } else {
-            console.log('[DEBUG] addHolding - sync not enabled or no cloud password, skipping automatic sync')
+            console.log('[DEBUG] addHolding - sync not enabled, skipping automatic sync')
           }
         }
       } catch (metaError) {
@@ -383,11 +383,11 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
         await metadataService.updateCacheForItem('holding', id, holdingMetadata)
         console.log('[DEBUG] updateHolding - metadata updated for ID:', id)
         
-        // 自動同期を実行（同期有効かつクラウドパスワードがある場合のみ）
+        // 自動同期を実行（同期有効な場合のみ）
         if (syncEnabled) {
-          if (syncService.isEnabled.value && syncService.hasCloudPassword.value) {
+          if (syncService.isEnabled.value) {
             console.log('[DEBUG] updateHolding - triggering automatic sync')
-            syncService.performSync().then(result => {
+            syncService.performSync({ skipConflictDetection: true }).then(result => {
               if (result.success) {
                 console.log('[DEBUG] updateHolding - automatic sync completed successfully')
                 // 同期完了後、未同期件数の更新を確実にするため少し待機
@@ -409,7 +409,7 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
               }
             })
           } else {
-            console.log('[DEBUG] updateHolding - sync not enabled or no cloud password, skipping automatic sync')
+            console.log('[DEBUG] updateHolding - sync not enabled, skipping automatic sync')
           }
         }
       } catch (metaError) {
@@ -473,11 +473,11 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
         await metadataService.updateCacheForItem('holding', id, holdingMetadata)
         console.log('[DEBUG] deleteHolding - metadata updated for ID:', id)
         
-        // 自動同期を実行（同期有効かつクラウドパスワードがある場合のみ）
+        // 自動同期を実行（同期有効な場合のみ）
         if (syncEnabled) {
-          if (syncService.isEnabled.value && syncService.hasCloudPassword.value) {
+          if (syncService.isEnabled.value) {
             console.log('[DEBUG] deleteHolding - triggering automatic sync')
-            syncService.performSync().then(result => {
+            syncService.performSync({ skipConflictDetection: true }).then(result => {
               if (result.success) {
                 console.log('[DEBUG] deleteHolding - automatic sync completed successfully')
                 // 同期完了後、未同期件数の更新を確実にするため少し待機

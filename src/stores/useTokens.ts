@@ -39,6 +39,15 @@ export const useTokensStore = defineStore('tokens', () => {
 
       await dbServiceV2.addToken(token)
       await loadTokens()
+      
+      // データ変更時の自動同期をトリガー
+      try {
+        const { syncService } = await import('@/services/sync.service')
+        await syncService.triggerSyncOnDataChange()
+      } catch (error) {
+        console.warn('Failed to trigger sync on token add:', error)
+      }
+      
       return true
     } catch (err) {
       error.value = 'トークンの追加に失敗しました'
@@ -52,6 +61,15 @@ export const useTokensStore = defineStore('tokens', () => {
       error.value = null
       await dbV2.tokens.delete(symbol)
       await loadTokens()
+      
+      // データ変更時の自動同期をトリガー
+      try {
+        const { syncService } = await import('@/services/sync.service')
+        await syncService.triggerSyncOnDataChange()
+      } catch (error) {
+        console.warn('Failed to trigger sync on token remove:', error)
+      }
+      
       return true
     } catch (err) {
       error.value = 'トークンの削除に失敗しました'

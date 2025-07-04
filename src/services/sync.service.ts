@@ -1,9 +1,16 @@
 import { ref, computed } from 'vue'
 import { googleAuthService } from './google-auth.service'
 import { googleDriveApiService, type DriveFile } from './google-drive-api.service'
-import { cloudEncryptionService, type EncryptedData, type CloudBackupData } from './cloud-encryption.service'
 import { GOOGLE_DRIVE_CONFIG, SYNC_CONFIG, ERROR_MESSAGES } from '@/config/google-drive.config'
 import { dbV2 } from '@/services/db-v2'
+
+// 新しいクラウドバックアップデータの型定義（暗号化なし）
+export interface CloudBackupData {
+  portfolioData: any
+  timestamp: number
+  version: string
+  checksum: string
+}
 
 // Type declaration for Toast notifications
 declare global {
@@ -80,7 +87,6 @@ class SyncService {
     conflictDetected: false
   })
 
-  private _cloudPassword = ref<string | null>(null)
   private _conflictData = ref<SyncConflict | null>(null)
   private syncTimer: number | null = null
   private conflictCheckTimer: number | null = null
@@ -97,7 +103,6 @@ class SyncService {
   get status() { return computed(() => this._status.value) }
   get isEnabled() { return computed(() => this._status.value.isEnabled) }
   get isSyncing() { return computed(() => this._status.value.isSyncing) }
-  get hasCloudPassword() { return computed(() => this._cloudPassword.value !== null) }
   get conflictData() { return computed(() => this._conflictData.value) }
   
   // Event emitter methods
@@ -165,27 +170,12 @@ class SyncService {
     }
   }
   
-  // Method to set cloud password (for manual sync scenarios)
-  setCloudPassword(password: string): void {
-    this._cloudPassword.value = password
-  }
-
   private async loadSyncStatus(): Promise<void> {
     try {
       const savedStatus = localStorage.getItem('syncStatus')
       if (savedStatus) {
         const parsed = JSON.parse(savedStatus)
         this._status.value = { ...this._status.value, ...parsed }
-      }
-
-      // Load cloud password if sync is enabled
-      if (this._status.value.isEnabled) {
-        const savedPassword = localStorage.getItem('cloudPassword')
-        if (savedPassword) {
-          this._cloudPassword.value = savedPassword
-        } else {
-          this._status.value.isEnabled = false
-        }
       }
 
       // Check if local data exists
@@ -200,9 +190,9 @@ class SyncService {
       // Initialize metadata service with global sync time
       try {
         const { metadataService } = await import('@/services/metadata.service')
-        if (this._status.value.lastSyncTime) {
-          metadataService.setGlobalSyncTime(new Date(this._status.value.lastSyncTime))
-        }
+        const globalSyncTime = this._status.value.lastSyncTime || 0
+        metadataService.setGlobalSyncTime(new Date(globalSyncTime))
+        console.log('[DEBUG] loadSyncStatus - initialized metadata service with global sync time:', globalSyncTime)
       } catch (error) {
         console.warn('Failed to initialize metadata service:', error)
       }
@@ -212,487 +202,400 @@ class SyncService {
   }
 
   private saveSyncStatus(): void {
-    const statusToSave = {
-      isEnabled: this._status.value.isEnabled,
-      lastSyncTime: this._status.value.lastSyncTime,
-      lastSyncError: this._status.value.lastSyncError
-    }
-    localStorage.setItem('syncStatus', JSON.stringify(statusToSave))
-    
-    // Save cloud password if enabled
-    if (this._status.value.isEnabled && this._cloudPassword.value) {
-      localStorage.setItem('cloudPassword', this._cloudPassword.value)
-    } else if (!this._status.value.isEnabled) {
-      localStorage.removeItem('cloudPassword')
+    try {
+      const statusToSave = {
+        isEnabled: this._status.value.isEnabled,
+        lastSyncTime: this._status.value.lastSyncTime,
+        lastSyncError: this._status.value.lastSyncError,
+        cloudFileExists: this._status.value.cloudFileExists,
+        localDataExists: this._status.value.localDataExists,
+        conflictDetected: this._status.value.conflictDetected
+      }
+      localStorage.setItem('syncStatus', JSON.stringify(statusToSave))
+    } catch (error) {
+      console.error('Failed to save sync status:', error)
     }
   }
 
   async checkCloudFileExists(): Promise<void> {
     try {
-      console.log('Checking for cloud backup file...')
       const backupFile = await googleDriveApiService.findBackupFile()
-      this._status.value.cloudFileExists = backupFile !== null
-      console.log('Cloud file check result:', backupFile !== null)
-      console.log('Backup file:', backupFile)
+      this._status.value.cloudFileExists = !!backupFile
+      this.saveSyncStatus()
     } catch (error) {
       console.error('Failed to check cloud file existence:', error)
       this._status.value.cloudFileExists = false
     }
   }
 
-  async enableSync(cloudPassword: string): Promise<SyncResult> {
+  // 同期を有効化（既存ユーザー用）
+  async enableSync(): Promise<SyncResult> {
     try {
+      console.log('[DEBUG] enableSync - starting sync enablement for existing user')
+      
+      // Google認証チェック
       if (!googleAuthService.isAuthenticated.value) {
         throw new Error('Google認証が必要です')
       }
 
-      // Validate password
-      const passwordValidation = cloudEncryptionService.validatePassword(cloudPassword)
-      if (!passwordValidation.isValid) {
-        throw new Error(`パスワードが要件を満たしていません: ${passwordValidation.errors.join(', ')}`)
-      }
-
-      // Test encryption with password
-      const encryptionTest = await cloudEncryptionService.testEncryption(cloudPassword)
-      if (!encryptionTest) {
-        throw new Error('暗号化テストに失敗しました')
-      }
-
-      // Set cloud password first
-      this._cloudPassword.value = cloudPassword
-      
-      // Update local storage encryption key to match cloud password
-      const { authService } = await import('@/services/auth.service')
-      const { secureStorage } = await import('@/services/storage.service')
-      
-      // Check if user has existing auth state
-      const authState = await secureStorage.getAuthState()
-      console.log('[DEBUG] enableSync - existing authState:', authState)
-      
-      if (authState.passwordHash && authState.salt) {
-        // Existing user - verify and unlock with cloud password
-        const unlockResult = await authService.unlockWithPassword(cloudPassword)
-        if (!unlockResult.success) {
-          // Password mismatch - this could be a password change scenario
-          // Clear incompatible encrypted data and setup new password
-          console.log('[DEBUG] enableSync - password mismatch, clearing incompatible data')
-          await secureStorage.clearIncompatibleEncryptedData()
-          
-          const setupResult = await authService.setupPassword(cloudPassword)
-          if (!setupResult.success) {
-            throw new Error('ローカル暗号化キーの再設定に失敗しました')
-          }
-          console.log('[DEBUG] enableSync - password reset and new key setup completed')
-        } else {
-          console.log('[DEBUG] enableSync - existing user unlocked successfully')
-        }
-      } else {
-        // New user or reset - setup password
-        const setupResult = await authService.setupPassword(cloudPassword)
-        if (!setupResult.success) {
-          throw new Error('ローカル暗号化キーの設定に失敗しました')
-        }
-        console.log('[DEBUG] enableSync - new user password setup completed')
-      }
-
+      // 同期設定を有効化
       this._status.value.isEnabled = true
       this._status.value.lastSyncError = null
+      this.saveSyncStatus()
 
-      // Perform initial sync
-      const syncResult = await this.performSync()
-      
-      if (syncResult.success) {
-        this.startAutoSync()
+      // 初期データを確実に同期済みとしてマーク
+      try {
+        const { metadataService } = await import('@/services/metadata.service')
+        await metadataService.forceResetAllMetadata()
+        console.log('[DEBUG] enableSync - initial data marked as synced')
+      } catch (error) {
+        console.warn('[DEBUG] enableSync - failed to mark initial data as synced:', error)
       }
 
-      this.saveSyncStatus()
-      return syncResult
-    } catch (error: any) {
+      // 自動同期を開始
+      this.startAutoSync()
+
+      // 即座に同期を実行
+      console.log('[DEBUG] enableSync - performing initial sync')
+      const syncResult = await this.performSync()
+      
+      if (!syncResult.success && !syncResult.conflictData) {
+        // 競合以外のエラーの場合は同期を無効化
+        this._status.value.isEnabled = false
+        this.stopAutoSync()
+        this.saveSyncStatus()
+        return syncResult
+      }
+
+      console.log('[DEBUG] enableSync - sync enabled successfully')
+      return { success: true, message: '同期が有効になりました' }
+    } catch (error) {
       console.error('Failed to enable sync:', error)
+      this._status.value.isEnabled = false
+      this._status.value.lastSyncError = error instanceof Error ? error.message : '同期の有効化に失敗しました'
+      this.saveSyncStatus()
+      
       return {
         success: false,
-        message: error?.message || 'クラウド同期の有効化に失敗しました'
+        message: error instanceof Error ? error.message : '同期の有効化に失敗しました'
       }
     }
   }
 
-  async enableSyncForNewUser(cloudPassword: string): Promise<SyncResult> {
+  // 同期を有効化（新規ユーザー用）
+  async enableSyncForNewUser(): Promise<SyncResult> {
     try {
+      console.log('[DEBUG] enableSyncForNewUser - starting sync enablement for new user')
+      
+      // Google認証チェック
       if (!googleAuthService.isAuthenticated.value) {
         throw new Error('Google認証が必要です')
       }
 
-      // Validate password
-      const passwordValidation = cloudEncryptionService.validatePassword(cloudPassword)
-      if (!passwordValidation.isValid) {
-        throw new Error(`パスワードが要件を満たしていません: ${passwordValidation.errors.join(', ')}`)
-      }
-
-      // Test encryption with password
-      const encryptionTest = await cloudEncryptionService.testEncryption(cloudPassword)
-      if (!encryptionTest) {
-        throw new Error('暗号化テストに失敗しました')
-      }
-
-      // Set cloud password first
-      this._cloudPassword.value = cloudPassword
-      
-      // Update local storage encryption key to match cloud password
-      const { authService } = await import('@/services/auth.service')
-      const { secureStorage } = await import('@/services/storage.service')
-      
-      // For new users, always setup the password
-      const setupResult = await authService.setupPassword(cloudPassword)
-      if (!setupResult.success) {
-        throw new Error('ローカル暗号化キーの設定に失敗しました')
-      }
-      console.log('[DEBUG] enableSyncForNewUser - password setup completed')
-      
+      // 同期設定を有効化
       this._status.value.isEnabled = true
       this._status.value.lastSyncError = null
+      this.saveSyncStatus()
 
-      // For new users, create an empty initial data file in Google Drive
-      console.log('Creating initial empty data file for new user...')
-      const initialData = {
-        holdings: [],
-        locations: [],
-        tokens: []
+      // 初期データを確実に同期済みとしてマーク
+      try {
+        const { metadataService } = await import('@/services/metadata.service')
+        await metadataService.forceResetAllMetadata()
+        console.log('[DEBUG] enableSyncForNewUser - initial data marked as synced')
+      } catch (error) {
+        console.warn('[DEBUG] enableSyncForNewUser - failed to mark initial data as synced:', error)
       }
-      
-      await this.uploadToCloud(initialData)
-      console.log('Initial data file created successfully')
-      
-      this._status.value.cloudFileExists = true
-      this._status.value.lastSyncTime = Date.now()
 
+      // 自動同期を開始
       this.startAutoSync()
+
+      // 即座に同期を実行
+      console.log('[DEBUG] enableSyncForNewUser - performing initial sync')
+      const syncResult = await this.performSync()
+      
+      if (!syncResult.success && !syncResult.conflictData) {
+        // 競合以外のエラーの場合は同期を無効化
+        this._status.value.isEnabled = false
+        this.stopAutoSync()
+        this.saveSyncStatus()
+        return syncResult
+      }
+
+      console.log('[DEBUG] enableSyncForNewUser - sync enabled successfully')
+      return { success: true, message: '同期が有効になりました' }
+    } catch (error) {
+      console.error('Failed to enable sync for new user:', error)
+      this._status.value.isEnabled = false
+      this._status.value.lastSyncError = error instanceof Error ? error.message : '同期の有効化に失敗しました'
       this.saveSyncStatus()
       
-      return { success: true, message: 'クラウド同期が有効になりました' }
-    } catch (error: any) {
-      console.error('Failed to enable sync for new user:', error)
       return {
         success: false,
-        message: error?.message || 'クラウド同期の有効化に失敗しました'
+        message: error instanceof Error ? error.message : '同期の有効化に失敗しました'
       }
     }
   }
 
   async disableSync(): Promise<void> {
+    console.log('[DEBUG] disableSync - disabling sync')
     this._status.value.isEnabled = false
-    this._cloudPassword.value = null
+    this._status.value.lastSyncError = null
     this.stopAutoSync()
-    
-    // Note: We intentionally do NOT clear the encryption key here
-    // to allow continued local data access without re-authentication
-    console.log('[DEBUG] disableSync - sync disabled but encryption key preserved for local access')
-    
     this.saveSyncStatus()
+    
+    // クラウドパスワードをローカルストレージから削除
+    localStorage.removeItem('cloudPassword')
+    
+    console.log('[DEBUG] disableSync - sync disabled successfully')
   }
 
-  async performSync(): Promise<SyncResult> {
-    if (!this._status.value.isEnabled || !googleAuthService.isAuthenticated.value) {
-      return { success: false, message: '同期が無効または認証されていません' }
-    }
-
+  async performSync(options: { skipConflictDetection?: boolean } = {}): Promise<SyncResult> {
     if (this._status.value.isSyncing) {
-      return { success: false, message: '同期中です' }
+      return { success: false, message: '同期が既に実行中です' }
     }
 
-    try {
-      this._status.value.isSyncing = true
-      this._status.value.lastSyncError = null
-      console.log('[DEBUG] performSync - starting sync process')
+    if (!googleAuthService.isAuthenticated.value) {
+      return { success: false, message: 'Google認証が必要です' }
+    }
 
-      // Ensure storage is unlocked before sync
+    this._status.value.isSyncing = true
+    this._status.value.lastSyncError = null
+    
+    try {
+      console.log('[DEBUG] performSync - starting sync process')
+      
+      // 暗号化キーの復元を試行
       const { secureStorage } = await import('@/services/storage.service')
       if (!secureStorage.isUnlocked()) {
-        console.log('[DEBUG] performSync - storage is locked, attempting auto unlock...')
-        
-        // Try to restore encryption key from session storage or local storage
-        let keyData = sessionStorage.getItem('encryptionKey')
-        let keySource = 'session'
-        
-        // セッションストレージにない場合はローカルストレージから取得
-        if (!keyData) {
-          keyData = localStorage.getItem('encryptionKey')
-          keySource = 'local'
-        }
-        
-        if (keyData) {
-          try {
-            const { CryptoService } = await import('@/services/crypto.service')
-            const cryptoKey = await CryptoService.importKey(keyData)
-            secureStorage.setEncryptionKey(cryptoKey)
-            
-            if (secureStorage.isUnlocked()) {
-              console.log(`[DEBUG] performSync - successfully auto-unlocked with ${keySource} key`)
-              
-              // セッションストレージにキーがない場合は保存
-              if (keySource === 'local' && !sessionStorage.getItem('encryptionKey')) {
-                sessionStorage.setItem('encryptionKey', keyData)
-                console.log('[DEBUG] performSync - restored key to session storage')
-              }
-            }
-          } catch (keyError) {
-            console.error(`[DEBUG] performSync - failed to import key from ${keySource} storage:`, keyError)
-            // Remove invalid key
-            if (keySource === 'session') {
-              sessionStorage.removeItem('encryptionKey')
-            } else {
-              localStorage.removeItem('encryptionKey')
-            }
-          }
-        }
-        
-        // If still locked, request unlock from user
-        if (!secureStorage.isUnlocked()) {
-          console.log('[DEBUG] performSync - auto unlock failed, sync cannot proceed without unlock')
-          return { success: false, message: 'ストレージがロックされています。データにアクセスするにはパスワードを入力してください。' }
+        const autoUnlockSuccess = await this.attemptAutoUnlock()
+        if (!autoUnlockSuccess) {
+          throw new Error('ENCRYPTION_KEY_NOT_AVAILABLE')
         }
       }
 
-      // Get current local data and timestamp
+      // ローカルデータを取得
       const localData = await this.getLocalData()
       const localTimestamp = await this.getLocalTimestamp()
-      console.log('[DEBUG] performSync - local data retrieved:', {
+      
+      console.log('[DEBUG] performSync - got local data:', {
         holdingsCount: localData.holdings?.length || 0,
-        tokensCount: localData.tokens?.length || 0,
         locationsCount: localData.locations?.length || 0,
+        tokensCount: localData.tokens?.length || 0,
         localTimestamp: new Date(localTimestamp).toISOString()
       })
 
-      // Check if backup file exists
+      // クラウドファイルの存在確認
       const backupFile = await googleDriveApiService.findBackupFile()
-      console.log('[DEBUG] performSync - backup file check:', backupFile ? 'exists' : 'not found')
-
+      
       if (!backupFile) {
-        // No cloud backup exists - upload current data
-        console.log('[DEBUG] performSync - uploading initial backup')
+        // クラウドファイルが存在しない場合は新規アップロード
+        console.log('[DEBUG] performSync - no cloud file found, uploading local data')
         await this.uploadToCloud(localData)
         
-        // Update sync status and metadata
-        this._status.value.lastSyncTime = Date.now()
+        const syncTime = Date.now()
+        this._status.value.lastSyncTime = syncTime
         this._status.value.cloudFileExists = true
+        
+        await this.updateLocalTimestamps(syncTime)
+        
         this.saveSyncStatus()
-        
-        // Mark all current data as synced
-        const { metadataService } = await import('@/services/metadata.service')
-        await metadataService.markAllAsSynced()
-        console.log('[DEBUG] performSync - initial upload completed, all data marked as synced')
-        
-        // 同期時刻をメタデータサービスにも保存
-        metadataService.setGlobalSyncTime(new Date(this._status.value.lastSyncTime))
-        
-        // キャッシュを強制的にクリアして未同期件数を正しく更新
-        metadataService.clearMetadataCache()
-        console.log('[DEBUG] performSync - metadata cache cleared after initial sync')
-        
         this.emitSyncComplete()
-        return { success: true, message: '初回同期が完了しました' }
+        
+        return { success: true, message: 'ローカルデータをクラウドにアップロードしました' }
       }
 
-      // Download and compare with local data
+      // クラウドデータをダウンロード
       console.log('[DEBUG] performSync - downloading cloud data')
       const cloudData = await this.downloadFromCloud(backupFile.id)
-      console.log('[DEBUG] performSync - cloud data retrieved:', {
-        holdingsCount: cloudData.portfolioData.holdings?.length || 0,
-        tokensCount: cloudData.portfolioData.tokens?.length || 0,
-        locationsCount: cloudData.portfolioData.locations?.length || 0,
+      
+      console.log('[DEBUG] performSync - got cloud data:', {
+        holdingsCount: cloudData.portfolioData?.holdings?.length || 0,
+        locationsCount: cloudData.portfolioData?.locations?.length || 0,
+        tokensCount: cloudData.portfolioData?.tokens?.length || 0,
         cloudTimestamp: new Date(cloudData.timestamp).toISOString()
       })
 
-      // Create data hashes for comparison (BEFORE any modifications)
-      const localHash = this.createDataHash(localData)
-      const cloudHash = this.createDataHash(cloudData.portfolioData)
-      console.log('[DEBUG] performSync - hash comparison:', {
-        localHash: localHash.substring(0, 50) + '...',
-        cloudHash: cloudHash.substring(0, 50) + '...',
-        hashesMatch: localHash === cloudHash
-      })
-
-      // If hashes match, data is identical - just update timestamps
-      if (localHash === cloudHash) {
-        console.log('[DEBUG] performSync - data identical, updating timestamps only')
+      // 競合検出（スキップオプションが有効でない場合のみ）
+      if (!options.skipConflictDetection) {
+        const hasConflict = await this.detectConflict(localData, cloudData, localTimestamp)
         
-        this._status.value.lastSyncTime = Date.now()
-        this.saveSyncStatus()
-        
-        // Mark all data as synced since they're identical
-        const { metadataService } = await import('@/services/metadata.service')
-        await metadataService.markAllAsSynced()
-        console.log('[DEBUG] performSync - sync completed successfully (no changes needed)')
-        
-        // 同期時刻をメタデータサービスにも保存
-        metadataService.setGlobalSyncTime(new Date(this._status.value.lastSyncTime))
-        
-        // キャッシュを強制的にクリアして未同期件数を正しく更新
-        metadataService.clearMetadataCache()
-        console.log('[DEBUG] performSync - metadata cache cleared after identical data sync')
-        
-        this.emitSyncComplete()
-        return { success: true, message: '同期が完了しました（変更なし）' }
-      }
-
-      // ローカルデータが空で未同期データがない場合は、クラウドデータを復元（競合判定をスキップ）
-      const isLocalDataEmpty = (localData.holdings || []).length === 0 && 
-                               (localData.tokens || []).length === 0 && 
-                               (localData.locations || []).length === 0
-      const hasNewLocalData = await this.hasNewLocalData()
-      console.log('[DEBUG] performSync - data state check:', {
-        isLocalDataEmpty,
-        hasNewLocalData,
-        cloudHasData: (cloudData.portfolioData.holdings || []).length > 0 || 
-                      (cloudData.portfolioData.tokens || []).length > 0 || 
-                      (cloudData.portfolioData.locations || []).length > 0
-      })
-
-      // ローカルデータが空で未同期データがない場合は、クラウドデータを復元
-      if (isLocalDataEmpty && !hasNewLocalData) {
-        console.log('[DEBUG] performSync - restoring cloud data to empty local storage')
-        
-        // Update local data with cloud data
-        await this.updateLocalData(cloudData.portfolioData)
-        
-        // Update sync status
-        this._status.value.lastSyncTime = Date.now()
-        this._status.value.cloudFileExists = true
-        this.saveSyncStatus()
-        
-        // Mark all restored data as synced
-        const { metadataService } = await import('@/services/metadata.service')
-        await metadataService.markAllAsSynced()
-        console.log('[DEBUG] performSync - cloud data restored successfully, all data marked as synced')
-        
-        // 同期時刻をメタデータサービスにも保存
-        metadataService.setGlobalSyncTime(new Date(this._status.value.lastSyncTime))
-        
-        // キャッシュを強制的にクリアして未同期件数を正しく更新
-        metadataService.clearMetadataCache()
-        console.log('[DEBUG] performSync - metadata cache cleared after cloud data restoration')
-        
-        this.emitSyncComplete()
-        return { success: true, message: 'クラウドデータが復元されました' }
-      }
-
-      // 新規データのみの場合は競合ではなく、クラウドに追加する
-      if (hasNewLocalData && !this.hasConflictingModifications(localData, cloudData.portfolioData)) {
-        console.log('[DEBUG] performSync - new data only, uploading to cloud')
-        
-        // Upload merged data to cloud
-        await this.uploadToCloud(localData)
-        
-        // Update sync status
-        this._status.value.lastSyncTime = Date.now()
-        this._status.value.cloudFileExists = true
-        this.saveSyncStatus()
-        
-        // Mark all data as synced
-        const { metadataService } = await import('@/services/metadata.service')
-        await metadataService.markAllAsSynced()
-        console.log('[DEBUG] performSync - new data uploaded successfully')
-        
-        // 同期時刻をメタデータサービスにも保存
-        metadataService.setGlobalSyncTime(new Date(this._status.value.lastSyncTime))
-        
-        // キャッシュを強制的にクリアして未同期件数を正しく更新
-        metadataService.clearMetadataCache()
-        console.log('[DEBUG] performSync - metadata cache cleared after new data upload')
-        
-        this.emitSyncComplete()
-        return { success: true, message: '新しいデータが同期されました' }
-      }
-
-      // Data differs - check for conflicts
-      const hasConflict = await this.detectConflict(localData, cloudData, localTimestamp)
-      console.log('[DEBUG] performSync - conflict detection result:', hasConflict)
-
-      if (hasConflict) {
-        // Store conflict data for resolution
-        this._conflictData.value = {
-          localData,
-          cloudData: cloudData.portfolioData,
-          localTimestamp,
-          cloudTimestamp: cloudData.timestamp
+        if (hasConflict) {
+          console.log('[DEBUG] performSync - conflict detected, storing conflict data')
+          this._conflictData.value = {
+            localData,
+            cloudData: cloudData.portfolioData,
+            localTimestamp,
+            cloudTimestamp: cloudData.timestamp
+          }
+          this._status.value.conflictDetected = true
+          this._status.value.lastSyncError = '同期競合が検出されました'
+          this.saveSyncStatus()
+          
+          return {
+            success: false,
+            message: '同期競合が検出されました',
+            conflictData: this._conflictData.value
+          }
         }
-        this._status.value.conflictDetected = true
-        this.saveSyncStatus()
-        
-        console.log('[DEBUG] performSync - conflict detected, stored for resolution')
-        this.emitConflictResolved()
-        return {
-          success: false,
-          message: 'データに競合が検出されました。競合を解決してください。',
-          conflictData: this._conflictData.value
-        }
+      } else {
+        console.log('[DEBUG] performSync - skipping conflict detection, prioritizing local data')
       }
 
-      // No conflict - merge data (use most recent)
-      console.log('[DEBUG] performSync - no conflict, merging data')
-      const mergedData = await this.mergeData(localData, cloudData, localTimestamp)
+      // 同期処理
+      let finalData: any
+      let syncMessage: string
+
+      if (options.skipConflictDetection) {
+        // 競合検出をスキップした場合は常にローカルデータを優先
+        console.log('[DEBUG] performSync - local data priority mode, uploading to cloud')
+        finalData = localData
+        await this.uploadToCloud(finalData)
+        syncMessage = 'ローカルデータをクラウドにアップロードしました'
+      } else if (cloudData.timestamp > localTimestamp) {
+        // クラウドデータが新しい場合
+        console.log('[DEBUG] performSync - cloud data is newer, updating local data')
+        finalData = cloudData.portfolioData
+        await this.updateLocalData(finalData)
+        syncMessage = 'クラウドデータでローカルデータを更新しました'
+      } else if (localTimestamp > cloudData.timestamp) {
+        // ローカルデータが新しい場合
+        console.log('[DEBUG] performSync - local data is newer, uploading to cloud')
+        finalData = localData
+        await this.uploadToCloud(finalData)
+        syncMessage = 'ローカルデータをクラウドにアップロードしました'
+      } else {
+        // タイムスタンプが同じ場合
+        console.log('[DEBUG] performSync - timestamps are equal, no sync needed')
+        finalData = localData
+        syncMessage = 'データは既に同期されています'
+      }
+
+      // 同期完了処理
+      const syncTime = Date.now()
+      this._status.value.lastSyncTime = syncTime
+      this._status.value.conflictDetected = false
+      this._conflictData.value = null
       
-      // Update both local and cloud with merged data
-      await this.updateLocalData(mergedData)
-      await this.uploadToCloud(mergedData)
-
-      // Update sync status
-      this._status.value.lastSyncTime = Date.now()
-      this._status.value.cloudFileExists = true
+      await this.updateLocalTimestamps(syncTime)
+      
+      // 同期完了後、すべてのデータを同期済みとしてマーク
+      try {
+        const { metadataService } = await import('@/services/metadata.service')
+        await metadataService.markAllAsSynced()
+        console.log('[DEBUG] performSync - all data marked as synced')
+      } catch (error) {
+        console.warn('[DEBUG] performSync - failed to mark data as synced:', error)
+      }
+      
       this.saveSyncStatus()
-
-              // Mark all data as synced after successful merge
-        const { metadataService: metadataServiceMerge } = await import('@/services/metadata.service')
-        await metadataServiceMerge.markAllAsSynced()
-        console.log('[DEBUG] performSync - merge completed, all data marked as synced')
-
-        // 同期時刻をメタデータサービスにも保存
-        metadataServiceMerge.setGlobalSyncTime(new Date(this._status.value.lastSyncTime))
-
-        // キャッシュを強制的にクリアして未同期件数を正しく更新
-        metadataServiceMerge.clearMetadataCache()
-      console.log('[DEBUG] performSync - metadata cache cleared after merge completion')
-
       this.emitSyncComplete()
-      return { success: true, message: '同期が完了しました' }
-    } catch (error: any) {
-      console.error('[DEBUG] performSync - error occurred:', error)
-      const errorMessage = error?.message || '同期中にエラーが発生しました'
+      
+      console.log('[DEBUG] performSync - sync completed successfully')
+      return { success: true, message: syncMessage }
+
+    } catch (error) {
+      console.error('Sync failed:', error)
+      
+      if (error instanceof Error && error.message === 'ENCRYPTION_KEY_NOT_AVAILABLE') {
+        this._status.value.lastSyncError = '暗号化キーが利用できません。再ログインが必要です。'
+        return { success: false, message: '暗号化キーが利用できません。再ログインが必要です。' }
+      }
+      
+      const errorMessage = error instanceof Error ? error.message : '同期に失敗しました'
       this._status.value.lastSyncError = errorMessage
       this.saveSyncStatus()
+      
       return { success: false, message: errorMessage }
     } finally {
       this._status.value.isSyncing = false
     }
   }
 
+  private async attemptAutoUnlock(): Promise<boolean> {
+    try {
+      const { secureStorage } = await import('@/services/storage.service')
+      
+      if (secureStorage.isUnlocked()) {
+        console.log('[DEBUG] attemptAutoUnlock - storage already unlocked')
+        return true
+      }
+
+      // セッションストレージから暗号化キーを取得
+      let keyData = sessionStorage.getItem('encryptionKey')
+      let keySource = 'session'
+      
+      // セッションストレージにない場合はローカルストレージから取得
+      if (!keyData) {
+        keyData = localStorage.getItem('encryptionKey')
+        keySource = 'local'
+      }
+      
+      if (keyData) {
+        console.log(`[DEBUG] attemptAutoUnlock - found encryption key in ${keySource} storage, attempting to unlock`)
+        
+        try {
+          const { CryptoService } = await import('@/services/crypto.service')
+          const cryptoKey = await CryptoService.importKey(keyData)
+          secureStorage.setEncryptionKey(cryptoKey)
+          
+          if (secureStorage.isUnlocked()) {
+            console.log(`[DEBUG] attemptAutoUnlock - successfully unlocked with ${keySource} key`)
+            
+            // セッションストレージにキーがない場合は保存
+            if (keySource === 'local' && !sessionStorage.getItem('encryptionKey')) {
+              sessionStorage.setItem('encryptionKey', keyData)
+              console.log('[DEBUG] attemptAutoUnlock - restored key to session storage')
+            }
+            
+            return true
+          } else {
+            console.log(`[DEBUG] attemptAutoUnlock - ${keySource} key failed to unlock storage`)
+          }
+        } catch (keyError) {
+          console.error(`[DEBUG] attemptAutoUnlock - failed to import key from ${keySource} storage:`, keyError)
+          // Remove invalid key
+          if (keySource === 'session') {
+            sessionStorage.removeItem('encryptionKey')
+          } else {
+            localStorage.removeItem('encryptionKey')
+          }
+        }
+      } else {
+        console.log('[DEBUG] attemptAutoUnlock - no encryption key found in session or local storage')
+      }
+
+      return false
+    } catch (error) {
+      console.error('[DEBUG] attemptAutoUnlock - error during auto unlock:', error)
+      return false
+    }
+  }
+
   private async updateLocalTimestamps(syncTime: number): Promise<void> {
-    this._status.value.lastSyncTime = syncTime
     localStorage.setItem('lastDataModified', syncTime.toString())
-    this.saveSyncStatus()
-    const { metadataService } = await import('@/services/metadata.service')
-    await metadataService.markAllAsSynced()
   }
 
   async getLocalData(): Promise<any> {
-    // Import secure storage to get decrypted data
     const { secureStorage } = await import('@/services/storage.service')
     
-    let holdings: any[] = []
-    
     try {
-      holdings = await secureStorage.getHoldings()
-    } catch (error: any) {
-      console.error('[DEBUG] getLocalData - failed to get holdings:', error)
-      
-      if (error.message === 'ENCRYPTION_KEY_MISMATCH') {
+      const holdings = await secureStorage.getHoldings()
+      console.log('[DEBUG] getLocalData - got holdings:', holdings.length)
+    } catch (error) {
+      if (error instanceof Error && error.message === 'ENCRYPTION_KEY_MISMATCH') {
         console.log('[DEBUG] getLocalData - clearing incompatible encrypted data')
         await secureStorage.clearIncompatibleEncryptedData()
-        holdings = [] // Return empty holdings after clearing
-      } else {
-        throw error
+        // After clearing, return empty data
+        return {
+          holdings: [],
+          locations: await dbV2.locations.toArray(),
+          tokens: await dbV2.tokens.toArray()
+        }
       }
+      throw error
     }
     
+    const holdings = await secureStorage.getHoldings()
     const locations = await dbV2.locations.toArray()
     const tokens = await dbV2.tokens.toArray()
     
@@ -709,15 +612,18 @@ class SyncService {
   }
 
   private async uploadToCloud(data: any): Promise<void> {
-    if (!this._cloudPassword.value) {
-      throw new Error('クラウドパスワードが設定されていません')
+    // 平文でのクラウドバックアップデータを作成
+    const backupData: CloudBackupData = {
+      portfolioData: data,
+      timestamp: Date.now(),
+      version: '2.0', // 新しいバージョン（暗号化なし）
+      checksum: this.createDataHash(data)
     }
 
-    const encryptedData = await cloudEncryptionService.encryptPortfolioData(data, this._cloudPassword.value)
-    const encryptedDataString = JSON.stringify(encryptedData)
+    const dataString = JSON.stringify(backupData, null, 2)
 
     // Check file size
-    if (encryptedDataString.length > SYNC_CONFIG.maxBackupSize) {
+    if (dataString.length > SYNC_CONFIG.maxBackupSize) {
       throw new Error('バックアップファイルのサイズが上限を超えています')
     }
 
@@ -725,11 +631,11 @@ class SyncService {
     
     if (backupFile) {
       // Update existing file
-      await googleDriveApiService.updateFile(backupFile.id, encryptedDataString)
+      await googleDriveApiService.updateFile(backupFile.id, dataString)
     } else {
       // Create new file
       await googleDriveApiService.uploadFile({
-        data: encryptedDataString,
+        data: dataString,
         metadata: {
           name: GOOGLE_DRIVE_CONFIG.backupFileName,
           mimeType: 'application/json'
@@ -739,14 +645,15 @@ class SyncService {
   }
 
   private async downloadFromCloud(fileId: string): Promise<CloudBackupData> {
-    if (!this._cloudPassword.value) {
-      throw new Error('クラウドパスワードが設定されていません')
-    }
-
-    const encryptedDataString = await googleDriveApiService.downloadFile(fileId)
-    const encryptedData: EncryptedData = JSON.parse(encryptedDataString)
+    const dataString = await googleDriveApiService.downloadFile(fileId)
+    const backupData: CloudBackupData = JSON.parse(dataString)
     
-    return await cloudEncryptionService.decryptPortfolioData(encryptedData, this._cloudPassword.value)
+    // データの整合性チェック
+    if (!backupData.portfolioData || !backupData.timestamp) {
+      throw new Error('無効なバックアップデータです')
+    }
+    
+    return backupData
   }
 
   private async detectConflict(localData: any, cloudData: CloudBackupData, localTimestamp: number): Promise<boolean> {
@@ -894,128 +801,109 @@ class SyncService {
       console.log('Added tokens:', data.tokens.length)
     }
     
+    // Update metadata service
+    try {
+      const { metadataService } = await import('@/services/metadata.service')
+      metadataService.clearMetadataCache()
+      console.log('[DEBUG] updateLocalData - metadata cache cleared')
+    } catch (error) {
+      console.warn('Failed to clear metadata cache:', error)
+    }
+    
+    // Update last data modified timestamp
     localStorage.setItem('lastDataModified', Date.now().toString())
-    console.log('updateLocalData completed successfully')
   }
 
-  /**
-   * Cleans object for IndexedDB storage by removing non-cloneable properties
-   */
   private cleanObjectForDB(obj: any): any {
     if (obj === null || obj === undefined) {
       return obj
     }
     
-    if (typeof obj !== 'object') {
-      return obj
+    if (Array.isArray(obj)) {
+      return obj.map(item => this.cleanObjectForDB(item))
     }
     
-    // Create a clean object with only serializable properties
-    const cleaned: any = {}
-    
-    for (const [key, value] of Object.entries(obj)) {
-      if (value !== undefined && value !== null) {
-        if (typeof value === 'object') {
-          if (Array.isArray(value)) {
-            cleaned[key] = value.map(item => this.cleanObjectForDB(item))
-          } else if (value instanceof Date) {
-            cleaned[key] = value
-          } else {
-            cleaned[key] = this.cleanObjectForDB(value)
-          }
-        } else if (typeof value === 'function') {
-          // Skip functions
-          continue
-        } else {
-          cleaned[key] = value
+    if (typeof obj === 'object') {
+      const cleaned: any = {}
+      for (const [key, value] of Object.entries(obj)) {
+        if (key !== 'metadata' && value !== undefined) {
+          cleaned[key] = this.cleanObjectForDB(value)
         }
       }
+      return cleaned
     }
     
-    return cleaned
+    return obj
   }
 
   async resolveConflict(resolution: 'local' | 'cloud', conflictData: SyncConflict): Promise<SyncResult> {
+    if (!conflictData) {
+      return { success: false, message: '競合データが見つかりません' }
+    }
+
+    this._status.value.isSyncing = true
+    
     try {
-      this._status.value.isSyncing = true
-      console.log('[DEBUG] resolveConflict - starting with resolution:', resolution)
-      
-      let finalData: any
-      
-      switch (resolution) {
-        case 'local':
-          finalData = conflictData.localData
-          break
-        case 'cloud':
-          finalData = conflictData.cloudData
-          break
+      let dataToUse: any
+      let message: string
+
+      if (resolution === 'local') {
+        // ローカルデータを使用
+        dataToUse = conflictData.localData
+        await this.uploadToCloud(dataToUse)
+        message = 'ローカルデータでクラウドを更新しました'
+      } else {
+        // クラウドデータを使用
+        dataToUse = conflictData.cloudData
+        await this.updateLocalData(dataToUse)
+        message = 'クラウドデータでローカルを更新しました'
       }
 
-      // Update both local and cloud
-      await this.updateLocalData(finalData)
-      await this.uploadToCloud(finalData)
-
-      // Clear conflict state
+      // 競合状態をクリア
       this._status.value.conflictDetected = false
       this._conflictData.value = null
-      this._status.value.lastSyncTime = Date.now()
       this._status.value.lastSyncError = null
+      
+      // 同期時刻を更新
+      const syncTime = Date.now()
+      this._status.value.lastSyncTime = syncTime
+      await this.updateLocalTimestamps(syncTime)
+      
       this.saveSyncStatus()
-
-      // Mark all items as synced after conflict resolution
-      try {
-        const { metadataService } = await import('@/services/metadata.service')
-        await metadataService.markAllAsSynced()
-        // 同期時刻をメタデータサービスにも保存
-        metadataService.setGlobalSyncTime(new Date(this._status.value.lastSyncTime))
-        
-        // キャッシュを強制的にクリアして未同期件数を正しく更新
-        metadataService.clearMetadataCache()
-        
-        console.log('[DEBUG] resolveConflict - metadata marked as synced')
-      } catch (metadataError) {
-        console.warn('[DEBUG] resolveConflict - metadata sync failed:', metadataError)
-        // Don't fail the entire conflict resolution if metadata sync fails
-      }
-
-      console.log('[DEBUG] resolveConflict - completed successfully')
       this.emitConflictResolved()
-      return { success: true, message: '競合が解決されました' }
+      
+      return { success: true, message }
     } catch (error) {
       console.error('Failed to resolve conflict:', error)
-      return { success: false, message: '競合の解決に失敗しました' }
+      const errorMessage = error instanceof Error ? error.message : '競合の解決に失敗しました'
+      this._status.value.lastSyncError = errorMessage
+      this.saveSyncStatus()
+      
+      return { success: false, message: errorMessage }
     } finally {
       this._status.value.isSyncing = false
     }
   }
 
   private startAutoSync(): void {
-    if (this.syncTimer) {
-      clearInterval(this.syncTimer)
-    }
-
+    this.stopAutoSync() // 既存のタイマーをクリア
+    
+    // 定期的な自動同期（5分間隔）
     this.syncTimer = window.setInterval(async () => {
-      if (this._status.value.isEnabled && googleAuthService.isAuthenticated.value) {
-        try {
-          const result = await this.performSync()
-          if (!result.success) {
-            console.warn('[DEBUG] Auto sync failed:', result.message)
-            // Show warning toast for auto sync failures (less intrusive than error)
-            if (window.showToast) {
-              window.showToast.warning('定期同期エラー', `定期同期に失敗しました: ${result.message}`)
-            }
-          } else {
-            console.log('[DEBUG] Auto sync completed successfully')
-          }
-        } catch (error) {
-          console.error('[DEBUG] Auto sync error:', error)
-          // Show error toast for auto sync errors
-          if (window.showToast) {
-            window.showToast.error('定期同期エラー', '定期同期中にエラーが発生しました')
-          }
-        }
+      if (!this._status.value.isSyncing && !this._status.value.conflictDetected) {
+        console.log('[DEBUG] Auto sync triggered')
+        await this.performSync()
       }
-    }, SYNC_CONFIG.autoSyncInterval)
+    }, 5 * 60 * 1000) // 5 minutes
+    
+    // 競合チェック（30秒間隔）
+    this.conflictCheckTimer = window.setInterval(async () => {
+      if (this._status.value.conflictDetected) {
+        console.log('[DEBUG] Conflict check - conflict still detected')
+      }
+    }, 30 * 1000) // 30 seconds
+    
+    console.log('[DEBUG] Auto sync timers started')
   }
 
   private stopAutoSync(): void {
@@ -1023,167 +911,61 @@ class SyncService {
       clearInterval(this.syncTimer)
       this.syncTimer = null
     }
+    
+    if (this.conflictCheckTimer) {
+      clearInterval(this.conflictCheckTimer)
+      this.conflictCheckTimer = null
+    }
+    
+    console.log('[DEBUG] Auto sync timers stopped')
   }
 
   async resetAutoSyncTimer(): Promise<void> {
-    console.log('Resetting auto-sync timer...')
     if (this._status.value.isEnabled) {
-      this.stopAutoSync()
       this.startAutoSync()
-      console.log('Auto-sync timer reset and restarted')
-    }
-  }
-
-  async testCloudPassword(password: string): Promise<boolean> {
-    try {
-      const backupFile = await googleDriveApiService.findBackupFile()
-      if (!backupFile) {
-        return true // No cloud file to test against
-      }
-
-      // Test decryption with the provided password
-      const encryptedDataString = await googleDriveApiService.downloadFile(backupFile.id)
-      const encryptedData: EncryptedData = JSON.parse(encryptedDataString)
-      
-      // Try to decrypt with the provided password
-      await cloudEncryptionService.decryptPortfolioData(encryptedData, password)
-      return true
-    } catch (error) {
-      console.error('Cloud password test failed:', error)
-      return false
-    }
-  }
-
-  async changeCloudPassword(currentPassword: string, newPassword: string): Promise<SyncResult> {
-    try {
-      console.log('Starting cloud password change process...')
-      
-      if (!googleAuthService.isAuthenticated.value) {
-        return { success: false, message: 'Google認証が必要です' }
-      }
-
-      // Step 1: Verify current password
-      const isCurrentPasswordValid = await this.testCloudPassword(currentPassword)
-      if (!isCurrentPasswordValid) {
-        return { success: false, message: '現在のパスワードが正しくありません' }
-      }
-
-      console.log('Current password verified')
-
-      // Step 2: Download current data with current password
-      const backupFile = await googleDriveApiService.findBackupFile()
-      if (!backupFile) {
-        return { success: false, message: 'クラウドバックアップファイルが見つかりません' }
-      }
-
-      const encryptedDataString = await googleDriveApiService.downloadFile(backupFile.id)
-      const encryptedData: EncryptedData = JSON.parse(encryptedDataString)
-      
-      // Decrypt with current password
-      const cloudData = await cloudEncryptionService.decryptPortfolioData(encryptedData, currentPassword)
-      console.log('Successfully decrypted cloud data with current password')
-
-      // Step 3: Update local authentication with new password
-      const { authService } = await import('@/services/auth.service')
-      const { secureStorage } = await import('@/services/storage.service')
-      
-      // Update local password hash and encryption key
-      const setupResult = await authService.setupPassword(newPassword)
-      if (!setupResult.success) {
-        return { success: false, message: 'ローカルパスワードの更新に失敗しました' }
-      }
-      
-      console.log('Local password updated successfully')
-
-      // Step 4: Update cloud password
-      this._cloudPassword.value = newPassword
-      
-      // Step 5: Re-encrypt and upload data with new password
-      await this.uploadToCloud(cloudData.portfolioData)
-      console.log('Successfully re-encrypted and uploaded data with new password')
-
-      // Step 6: Save sync status
-      this.saveSyncStatus()
-      
-      console.log('Cloud password change completed successfully')
-      
-      return { success: true, message: 'パスワードが正常に変更されました' }
-
-    } catch (error: any) {
-      console.error('Cloud password change failed:', error)
-      return { 
-        success: false, 
-        message: error.message || 'パスワード変更中にエラーが発生しました' 
-      }
     }
   }
 
   private async performInitialCleanup() {
     try {
-      console.log('[DEBUG] SyncService - performing initial cleanup')
-      
-      // 競合状態をクリア（アプリ起動時に残っている可能性がある）
-      this._status.value.conflictDetected = false
-      this._conflictData.value = null
-      
-      // 不整合なlastDataModifiedをクリア
-      const lastModified = localStorage.getItem('lastDataModified')
-      if (lastModified) {
-        const timestamp = parseInt(lastModified)
-        const now = Date.now()
-        
-        // 異常に古い、または未来のタイムスタンプをクリア
-        if (timestamp < 946684800000 || timestamp > now + 86400000) { // 2000年より前、または1日後より未来
-          console.log('[DEBUG] SyncService - clearing invalid lastDataModified:', timestamp)
-          localStorage.removeItem('lastDataModified')
-        }
+      // 古いクラウドパスワード関連の設定をクリーンアップ
+      const oldCloudPassword = localStorage.getItem('cloudPassword')
+      if (oldCloudPassword) {
+        console.log('[DEBUG] performInitialCleanup - removing old cloud password')
+        localStorage.removeItem('cloudPassword')
       }
-      
-      this.saveSyncStatus()
-      console.log('[DEBUG] SyncService - initial cleanup completed')
     } catch (error) {
-      console.warn('[DEBUG] SyncService - initial cleanup failed:', error)
+      console.warn('Failed to perform initial cleanup:', error)
     }
-  }
-
-  private async hasNewLocalData(): Promise<boolean> {
-    try {
-      const { metadataService } = await import('@/services/metadata.service')
-      const unsyncedCount = await metadataService.getUnsyncedDataCount()
-      
-      // 未同期データがある場合は新規データありとみなす
-      return unsyncedCount.total > 0
-    } catch (error) {
-      console.warn('[DEBUG] hasNewLocalData - error:', error)
-      return false
-    }
-  }
-  
-  private hasConflictingModifications(localData: any, cloudData: any): boolean {
-    // 既存データの変更があるかチェック（削除や更新）
-    // このメソッドは簡略化して、基本的には新規追加のみを想定
-    
-    // 保有データの数が減っている場合は削除があったとみなす
-    const localHoldingsCount = (localData.holdings || []).length
-    const cloudHoldingsCount = (cloudData.holdings || []).length
-    
-    if (localHoldingsCount < cloudHoldingsCount) {
-      console.log('[DEBUG] hasConflictingModifications - holdings count decreased, potential deletion')
-      return true
-    }
-    
-    // その他の競合チェックは省略（新規追加メインのため）
-    return false
   }
 
   destroy(): void {
     this.stopAutoSync()
-    if (this.conflictCheckTimer) {
-      clearInterval(this.conflictCheckTimer)
+    // Clear all event listeners
+    this.eventEmitter = new SyncEventEmitter()
+  }
+
+  /**
+   * データ変更時の自動同期をトリガー
+   */
+  async triggerSyncOnDataChange(): Promise<void> {
+    // 同期が有効で、現在同期中でなく、競合が検出されていない場合のみ実行
+    if (this._status.value.isEnabled && 
+        !this._status.value.isSyncing && 
+        !this._status.value.conflictDetected) {
+      console.log('[DEBUG] triggerSyncOnDataChange - triggering sync due to data change')
+      
+      // 短時間の遅延後に同期を実行（連続する変更をバッチ処理するため）
+      setTimeout(async () => {
+        if (this._status.value.isEnabled && 
+            !this._status.value.isSyncing && 
+            !this._status.value.conflictDetected) {
+          // データ変更時は競合検出をスキップしてローカルデータを優先
+          await this.performSync({ skipConflictDetection: true })
+        }
+      }, 1000) // 1秒の遅延
     }
   }
 }
 
-// Create and export singleton instance
 export const syncService = new SyncService()
-export default syncService

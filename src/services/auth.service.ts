@@ -1,14 +1,10 @@
 import { CryptoService } from './crypto.service'
 import { secureStorage, type AuthState } from './storage.service'
+import { googleAuthService } from './google-auth.service'
 
 export interface LoginResult {
   success: boolean
   error?: string
-}
-
-export interface PasswordValidation {
-  isValid: boolean
-  errors: string[]
 }
 
 export class AuthService {
@@ -19,163 +15,54 @@ export class AuthService {
   private onWarningCallback?: () => void
   private onLogoutCallback?: () => void
   
-  async isFirstTimeSetup(): Promise<boolean> {
-    const authState = await secureStorage.getAuthState()
-    return !authState.passwordHash
-  }
-  
-  async setupPassword(password: string): Promise<LoginResult> {
-    const validation = this.validatePassword(password)
-    if (!validation.isValid) {
-      return {
-        success: false,
-        error: validation.errors.join(', ')
-      }
-    }
-    
+  // Google認証からの暗号化キー設定
+  async setupEncryptionFromGoogleAuth(): Promise<LoginResult> {
     try {
-      const { hash, salt } = await CryptoService.hashPassword(password)
-      const { key } = await CryptoService.deriveKey(password)
+      // Google認証状態をチェック
+      if (!googleAuthService.isAuthenticated.value || !googleAuthService.user.value) {
+        return {
+          success: false,
+          error: 'Google認証が必要です'
+        }
+      }
+
+      const user = googleAuthService.user.value
+      if (!user.id || !user.email) {
+        return {
+          success: false,
+          error: 'Google認証情報が不完全です'
+        }
+      }
+
+      // Google認証情報から暗号化キーを生成
+      const encryptionKey = await CryptoService.deriveKeyFromGoogleAuth(user.id, user.email)
       
+      // 暗号化キーを設定
+      secureStorage.setEncryptionKey(encryptionKey)
+      
+      // 認証状態を設定（パスワードハッシュは不要）
       await secureStorage.setAuthState({
-        isAuthenticated: true,
-        passwordHash: hash,
-        salt
+        isAuthenticated: true
       })
       
-      secureStorage.setEncryptionKey(key)
-      
+      // 暗号化されていないデータがあれば移行
       await secureStorage.migrateUnencryptedData()
       
-      // Temporarily disable idle timer for debugging
-      // this.startIdleTimer()
+      // 初期データを確実に同期済みとしてマーク
+      try {
+        const { metadataService } = await import('./metadata.service')
+        await metadataService.forceResetAllMetadata()
+        console.log('[DEBUG] setupEncryptionFromGoogleAuth - initial data marked as synced')
+      } catch (error) {
+        console.warn('[DEBUG] setupEncryptionFromGoogleAuth - failed to mark initial data as synced:', error)
+      }
       
       return { success: true }
     } catch (error) {
-      console.error('Failed to setup password:', error)
+      console.error('Failed to setup encryption from Google auth:', error)
       return {
         success: false,
-        error: 'パスワードの設定に失敗しました'
-      }
-    }
-  }
-  
-  async login(password: string): Promise<LoginResult> {
-    try {
-      const authState = await secureStorage.getAuthState()
-      
-      if (!authState.passwordHash || !authState.salt) {
-        return {
-          success: false,
-          error: 'パスワードが設定されていません'
-        }
-      }
-      
-      const isValid = await CryptoService.verifyPassword(
-        password,
-        authState.passwordHash,
-        authState.salt
-      )
-      
-      if (!isValid) {
-        return {
-          success: false,
-          error: 'パスワードが正しくありません'
-        }
-      }
-      
-      const saltBuffer = new Uint8Array(this.base64ToArrayBuffer(authState.salt))
-      const { key } = await CryptoService.deriveKey(password, saltBuffer)
-      
-      secureStorage.setEncryptionKey(key)
-      
-      const newAuthState = {
-        ...authState,
-        isAuthenticated: true
-      }
-      console.log('[DEBUG] Setting auth state to:', newAuthState)
-      await secureStorage.setAuthState(newAuthState)
-      
-      const verifyState = await secureStorage.getAuthState()
-      console.log('[DEBUG] Verified auth state after setting:', verifyState)
-      
-      // Temporarily disable idle timer for debugging
-      // this.startIdleTimer()
-      
-      // ログイン時の自動同期を無効化（競合を避けるため）
-      // 代わりに、ユーザーが手動で同期を実行するか、データ変更時に自動同期される
-      console.log('[DEBUG] Login completed - auto sync disabled to prevent conflicts')
-      
-      return { success: true }
-    } catch (error) {
-      console.error('Login failed:', error)
-      return {
-        success: false,
-        error: 'ログインに失敗しました'
-      }
-    }
-  }
-  
-  async changePassword(currentPassword: string, newPassword: string): Promise<LoginResult> {
-    const validation = this.validatePassword(newPassword)
-    if (!validation.isValid) {
-      return {
-        success: false,
-        error: validation.errors.join(', ')
-      }
-    }
-    
-    try {
-      const authState = await secureStorage.getAuthState()
-      
-      if (!authState.passwordHash || !authState.salt) {
-        return {
-          success: false,
-          error: 'パスワードが設定されていません'
-        }
-      }
-      
-      const isCurrentValid = await CryptoService.verifyPassword(
-        currentPassword,
-        authState.passwordHash,
-        authState.salt
-      )
-      
-      if (!isCurrentValid) {
-        return {
-          success: false,
-          error: '現在のパスワードが正しくありません'
-        }
-      }
-      
-      const { hash, salt } = await CryptoService.hashPassword(newPassword)
-      const { key } = await CryptoService.deriveKey(newPassword)
-      
-      const allHoldings = await secureStorage.getHoldings()
-      
-      secureStorage.setEncryptionKey(key)
-      
-      for (const holding of allHoldings) {
-        await secureStorage.updateHolding(holding.id, {
-          quantity: holding.quantity,
-          locationId: holding.locationId,
-          note: holding.note,
-          symbol: holding.symbol
-        })
-      }
-      
-      await secureStorage.setAuthState({
-        isAuthenticated: true,
-        passwordHash: hash,
-        salt
-      })
-      
-      return { success: true }
-    } catch (error) {
-      console.error('Failed to change password:', error)
-      return {
-        success: false,
-        error: 'パスワードの変更に失敗しました'
+        error: '暗号化キーの設定に失敗しました'
       }
     }
   }
@@ -198,149 +85,117 @@ export class AuthService {
     try {
       this.clearTimers()
       
-      // Force clear all data regardless of lock state
-      await secureStorage.forceReset()
+      // Clear encryption key first
       secureStorage.clearEncryptionKey()
       
-      // Clear all localStorage data
+      // Force clear all application data (ignores lock state)
+      await secureStorage.forceReset()
+      
+      // Clear local storage
       localStorage.clear()
       
+      // Clear session storage
+      sessionStorage.clear()
+      
       // Clear IndexedDB databases
-      try {
-        await this.clearIndexedDB('CryptoPortfolioDB')
-        await this.clearIndexedDB('CryptoPortfolioDBV2')
-      } catch (error) {
-        console.warn('Failed to clear IndexedDB:', error)
-      }
+      await this.clearIndexedDB('CryptoPortfolioDB')
+      await this.clearIndexedDB('CryptoPortfolioDBV2')
       
       console.log('All data cleared successfully')
     } catch (error) {
-      console.error('Failed to reset data:', error)
+      console.error('Failed to clear data:', error)
       throw error
     }
   }
-
+  
   private clearIndexedDB(dbName: string): Promise<void> {
     return new Promise((resolve, reject) => {
       const deleteReq = indexedDB.deleteDatabase(dbName)
-      deleteReq.onsuccess = () => resolve()
       deleteReq.onerror = () => reject(deleteReq.error)
-      deleteReq.onblocked = () => {
-        console.warn(`IndexedDB ${dbName} deletion blocked`)
-        resolve() // Continue anyway
-      }
+      deleteReq.onsuccess = () => resolve()
+      deleteReq.onblocked = () => resolve() // Treat blocked as success
     })
   }
   
   async isAuthenticated(): Promise<boolean> {
     const authState = await secureStorage.getAuthState()
-    console.log('[DEBUG] authService.isAuthenticated - authState:', authState)
-    return authState.isAuthenticated
+    return authState.isAuthenticated || false
   }
   
   async isUnlockedAndAuthenticated(): Promise<boolean> {
-    const authState = await secureStorage.getAuthState()
-    return authState.isAuthenticated && secureStorage.isUnlocked()
+    const isAuth = await this.isAuthenticated()
+    return isAuth && secureStorage.isUnlocked()
   }
   
-  async unlockWithPassword(password: string): Promise<LoginResult> {
+  // Google認証情報を使用してストレージをアンロック
+  async unlockWithGoogleAuth(): Promise<LoginResult> {
     try {
+      // Google認証状態をチェック
+      if (!googleAuthService.isAuthenticated.value || !googleAuthService.user.value) {
+        return {
+          success: false,
+          error: 'Google認証が必要です'
+        }
+      }
+
+      const user = googleAuthService.user.value
+      if (!user.id || !user.email) {
+        return {
+          success: false,
+          error: 'Google認証情報が不完全です'
+        }
+      }
+
+      // Google認証情報から暗号化キーを生成
+      const encryptionKey = await CryptoService.deriveKeyFromGoogleAuth(user.id, user.email)
+      
+      // 暗号化キーを設定
+      secureStorage.setEncryptionKey(encryptionKey)
+      
+      // 認証状態を更新
       const authState = await secureStorage.getAuthState()
-      console.log('[DEBUG] unlockWithPassword - authState:', authState)
-      
-      // For existing users, we only need passwordHash and salt, not isAuthenticated
-      if (!authState.passwordHash || !authState.salt) {
-        return {
-          success: false,
-          error: '認証情報が見つかりません'
-        }
-      }
-      
-      // Verify password against stored hash
-      const isValid = await CryptoService.verifyPassword(
-        password,
-        authState.passwordHash,
-        authState.salt
-      )
-      
-      if (!isValid) {
-        return {
-          success: false,
-          error: 'パスワードが正しくありません'
-        }
-      }
-      
-      // Derive encryption key and unlock storage
-      const saltBuffer = new Uint8Array(this.base64ToArrayBuffer(authState.salt))
-      const { key } = await CryptoService.deriveKey(password, saltBuffer)
-      secureStorage.setEncryptionKey(key)
-      
-      // Update authentication state to true after successful unlock
-      await secureStorage.setAuthState({
+      const newAuthState = {
         ...authState,
         isAuthenticated: true
-      })
+      }
+      console.log('[DEBUG] Setting auth state to:', newAuthState)
+      await secureStorage.setAuthState(newAuthState)
       
-      console.log('[DEBUG] unlockWithPassword - encryption key set, storage unlocked:', secureStorage.isUnlocked())
+      const verifyState = await secureStorage.getAuthState()
+      console.log('[DEBUG] Verified auth state after setting:', verifyState)
+      
+      // 初期データを確実に同期済みとしてマーク
+      try {
+        const { metadataService } = await import('./metadata.service')
+        await metadataService.forceResetAllMetadata()
+        console.log('[DEBUG] unlockWithGoogleAuth - initial data marked as synced')
+      } catch (error) {
+        console.warn('[DEBUG] unlockWithGoogleAuth - failed to mark initial data as synced:', error)
+      }
       
       return { success: true }
     } catch (error) {
-      console.error('Unlock failed:', error)
+      console.error('Unlock with Google auth failed:', error)
       return {
         success: false,
-        error: 'ロック解除に失敗しました'
+        error: 'ストレージのアンロックに失敗しました'
       }
     }
-  }
-  
-  validatePassword(password: string): PasswordValidation {
-    const errors: string[] = []
-    
-    if (password.length < 8) {
-      errors.push('パスワードは8文字以上である必要があります')
-    }
-    
-    if (!/[A-Z]/.test(password)) {
-      errors.push('大文字を含む必要があります')
-    }
-    
-    if (!/[a-z]/.test(password)) {
-      errors.push('小文字を含む必要があります')
-    }
-    
-    if (!/[0-9]/.test(password)) {
-      errors.push('数字を含む必要があります')
-    }
-    
-    return {
-      isValid: errors.length === 0,
-      errors
-    }
-  }
-  
-  getPasswordStrength(password: string): number {
-    let score = 0
-    
-    if (password.length >= 8) score += 25
-    if (password.length >= 12) score += 25
-    if (/[A-Z]/.test(password)) score += 12.5
-    if (/[a-z]/.test(password)) score += 12.5
-    if (/[0-9]/.test(password)) score += 12.5
-    if (/[^A-Za-z0-9]/.test(password)) score += 12.5
-    
-    return Math.min(100, score)
   }
   
   private startIdleTimer(): void {
     this.clearTimers()
     
     this.warningTimer = window.setTimeout(() => {
-      this.onWarningCallback?.()
+      if (this.onWarningCallback) {
+        this.onWarningCallback()
+      }
     }, this.WARNING_TIME)
     
     this.idleTimer = window.setTimeout(() => {
-      this.logout()
-      this.onLogoutCallback?.()
+      if (this.onLogoutCallback) {
+        this.onLogoutCallback()
+      }
     }, this.IDLE_TIMEOUT)
   }
   
@@ -356,7 +211,7 @@ export class AuthService {
   }
   
   resetIdleTimer(): void {
-    if (secureStorage.isUnlocked()) {
+    if (this.idleTimer || this.warningTimer) {
       this.startIdleTimer()
     }
   }
@@ -374,17 +229,8 @@ export class AuthService {
   }
   
   getRemainingTime(): number {
-    if (!this.idleTimer) return 0
+    // 簡略化のため、固定値を返す
     return this.IDLE_TIMEOUT
-  }
-  
-  private base64ToArrayBuffer(base64: string): ArrayBuffer {
-    const binary = atob(base64)
-    const bytes = new Uint8Array(binary.length)
-    for (let i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i)
-    }
-    return bytes.buffer
   }
 }
 

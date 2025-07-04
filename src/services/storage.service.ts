@@ -123,6 +123,14 @@ export class SecureStorageService {
       console.warn('Failed to update metadata for new holding:', error)
     }
     
+    // データ変更時の自動同期をトリガー
+    try {
+      const { syncService } = await import('@/services/sync.service')
+      await syncService.triggerSyncOnDataChange()
+    } catch (error) {
+      console.warn('Failed to trigger sync on data change:', error)
+    }
+    
     return newHolding.id
   }
   
@@ -165,6 +173,14 @@ export class SecureStorageService {
       console.warn('Failed to update metadata for holding update:', error)
     }
     
+    // データ変更時の自動同期をトリガー
+    try {
+      const { syncService } = await import('@/services/sync.service')
+      await syncService.triggerSyncOnDataChange()
+    } catch (error) {
+      console.warn('Failed to trigger sync on data change:', error)
+    }
+    
     return result
   }
   
@@ -188,6 +204,14 @@ export class SecureStorageService {
     
     // Update last data modified timestamp for sync
     localStorage.setItem('lastDataModified', Date.now().toString())
+    
+    // データ変更時の自動同期をトリガー
+    try {
+      const { syncService } = await import('@/services/sync.service')
+      await syncService.triggerSyncOnDataChange()
+    } catch (error) {
+      console.warn('Failed to trigger sync on data change:', error)
+    }
   }
   
   async getHoldings(): Promise<Holding[]> {
