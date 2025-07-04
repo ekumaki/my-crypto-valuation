@@ -3,7 +3,7 @@
     <!-- Header with Add Button -->
     <div class="flex justify-between items-center">
       <h2 class="text-2xl font-bold text-gray-900 dark:text-white">
-        保有数量入力
+        一覧
       </h2>
       
       <button

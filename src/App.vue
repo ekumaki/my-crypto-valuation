@@ -52,15 +52,6 @@
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div class="flex space-x-8">
             <router-link
-              to="/summary"
-              class="border-b-2 py-4 px-1 text-sm font-medium transition-colors"
-              :class="$route.name === 'summary' 
-                ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400' 
-                : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300'"
-            >
-              銘柄別
-            </router-link>
-            <router-link
               to="/edit"
               class="border-b-2 py-4 px-1 text-sm font-medium transition-colors"
               :class="$route.name === 'edit' 
@@ -68,6 +59,15 @@
                 : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300'"
             >
               一覧
+            </router-link>
+            <router-link
+              to="/summary"
+              class="border-b-2 py-4 px-1 text-sm font-medium transition-colors"
+              :class="$route.name === 'summary' 
+                ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400' 
+                : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300'"
+            >
+              銘柄別
             </router-link>
             <router-link
               to="/exchange"

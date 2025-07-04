@@ -3,7 +3,7 @@
     <!-- Header with Price Update Button -->
     <div class="flex justify-between items-center">
       <h2 class="text-2xl font-bold text-gray-900 dark:text-white">
-        ポートフォリオ
+        銘柄別一覧
       </h2>
       
       <button
@@ -42,20 +42,17 @@
               <th scope="col" class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                 評価額（JPY）
               </th>
-              <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                メモ
-              </th>
             </tr>
           </thead>
           <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
             <tr v-if="holdingsStore.aggregatedHoldings.size === 0">
-              <td colspan="5" class="px-6 py-12 text-center text-gray-500 dark:text-gray-400">
+              <td colspan="4" class="px-6 py-12 text-center text-gray-500 dark:text-gray-400">
                 <div class="flex flex-col items-center">
                   <svg class="w-12 h-12 mb-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"></path>
                   </svg>
                   <p class="text-lg font-medium mb-2">保有通貨がありません</p>
-                  <p class="text-sm">「保有数量入力」タブから仮想通貨を追加してください</p>
+                  <p class="text-sm">「一覧」タブから仮想通貨を追加してください</p>
                 </div>
               </td>
             </tr>
@@ -109,26 +106,18 @@
                   <span v-else class="text-gray-400">-</span>
                 </div>
               </td>
-
-              <!-- Notes -->
-              <td class="px-6 py-4">
-                <div class="text-sm text-gray-500 dark:text-gray-400 truncate max-w-xs">
-                  {{ data.notes.join(', ') || '-' }}
-                </div>
-              </td>
             </tr>
           </tbody>
           
           <!-- Total Footer -->
           <tfoot v-if="holdingsStore.aggregatedHoldings.size > 0" class="bg-gray-50 dark:bg-gray-700 font-medium sticky bottom-0">
             <tr class="border-t border-gray-200 dark:border-gray-600">
-              <td class="px-6 py-4 text-sm text-gray-900 dark:text-white" colspan="3">
+              <td class="px-6 py-4 text-sm text-gray-900 dark:text-white" colspan="2">
                 合計評価額
               </td>
               <td class="px-6 py-4 text-right text-lg font-bold text-gray-900 dark:text-white">
                 {{ formatCurrency(totalValue) }}
               </td>
-              <td></td>
             </tr>
           </tfoot>
         </table>
