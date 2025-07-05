@@ -4,12 +4,20 @@ import router from './router'
 import App from './App.vue'
 import './style.css'
 
-const app = createApp(App)
-const pinia = createPinia()
+// データベースの強制アップグレードを実行
+import { dbServiceV2 } from '@/services/db-v2'
 
-app.use(pinia)
-app.use(router)
-app.mount('#app')
+async function initializeApp() {
+  // データベースの強制アップグレードを実行
+  await dbServiceV2.forceUpgrade()
+  
+  const app = createApp(App)
+  app.use(createPinia())
+  app.use(router)
+  app.mount('#app')
+}
+
+initializeApp().catch(console.error)
 
 // Register service worker for PWA
 if ('serviceWorker' in navigator) {

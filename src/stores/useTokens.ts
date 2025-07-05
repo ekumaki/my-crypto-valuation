@@ -19,6 +19,15 @@ export const useTokensStore = defineStore('tokens', () => {
       isLoading.value = true
       error.value = null
       tokens.value = await dbV2.tokens.toArray()
+      
+      // アイコンが不足しているトークンがある場合は修復を実行
+      const tokensWithoutIcons = tokens.value.filter(token => !token.iconUrl)
+      if (tokensWithoutIcons.length > 0) {
+        console.log(`Found ${tokensWithoutIcons.length} tokens without icons, attempting repair...`)
+        await dbServiceV2.repairTokenIcons()
+        // 修復後に再読み込み
+        tokens.value = await dbV2.tokens.toArray()
+      }
     } catch (err) {
       error.value = 'トークンの読み込みに失敗しました'
       console.error('Failed to load tokens:', err)

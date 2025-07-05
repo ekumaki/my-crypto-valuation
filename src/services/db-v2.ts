@@ -81,6 +81,13 @@ export class CryptoPortfolioDBV2 extends Dexie {
       holdings: 'id, symbol, createdAt, updatedAt, isEncrypted, encryptedQuantity, encryptedLocationId, encryptedNote, metadata',
       prices: '[symbol+date], symbol, priceJpy, fetchedAt',
       tokens: 'symbol, name, id, iconUrl, metadata'
+    }).upgrade(tx => {
+      // 既存のトークンデータにiconUrlフィールドを追加
+      return tx.table('tokens').toCollection().modify(token => {
+        if (token.iconUrl === undefined) {
+          token.iconUrl = null
+        }
+      })
     })
 
     this.on('populate', () => this.populate())
@@ -252,11 +259,53 @@ export const dbServiceV2 = {
     }
   },
 
+  // トークンのアイコン情報を修復
+  async repairTokenIcons(): Promise<void> {
+    try {
+      const tokens = await dbV2.tokens.toArray()
+      const { coinGeckoService } = await import('@/services/coingecko')
+      
+      for (const token of tokens) {
+        if (!token.iconUrl) {
+          try {
+            // CoinGeckoからアイコン情報を取得
+            const searchResults = await coinGeckoService.searchTokens(token.symbol)
+            const foundToken = searchResults.find(result => 
+              result.symbol.toUpperCase() === token.symbol.toUpperCase()
+            )
+            
+            if (foundToken && foundToken.thumb) {
+              // アイコンURLを更新
+              await dbV2.tokens.update(token.symbol, { iconUrl: foundToken.thumb })
+              console.log(`Updated icon for ${token.symbol}:`, foundToken.thumb)
+            }
+          } catch (error) {
+            console.warn(`Failed to update icon for ${token.symbol}:`, error)
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Failed to repair token icons:', error)
+    }
+  },
+
   // Clear all data (for testing)
   async clearAllData(): Promise<void> {
     await dbV2.transaction('rw', dbV2.holdings, dbV2.prices, async () => {
       await dbV2.holdings.clear()
       await dbV2.prices.clear()
     })
+  },
+
+  // データベースの強制アップグレード
+  async forceUpgrade(): Promise<void> {
+    try {
+      // データベースを閉じて再オープンすることで強制アップグレード
+      await dbV2.close()
+      await dbV2.open()
+      console.log('Database force upgrade completed')
+    } catch (error) {
+      console.error('Failed to force upgrade database:', error)
+    }
   }
 }
