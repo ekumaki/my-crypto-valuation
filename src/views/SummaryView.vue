@@ -58,7 +58,7 @@
             </tr>
             
             <tr 
-              v-for="[symbol, data] in holdingsStore.aggregatedHoldings" 
+              v-for="{ symbol, data } in sortedAggregatedHoldings" 
               :key="symbol"
               @click="showBreakdown(symbol, data)"
               class="hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer"
@@ -202,6 +202,15 @@ const totalValue = computed(() => {
   }
   return total
 })
+
+const sortedAggregatedHoldings = computed(() => {
+  return Array.from(holdingsStore.aggregatedHoldings.entries())
+    .map(([symbol, data]) => {
+      const value = getSymbolValue(symbol, data.totalQuantity);
+      return { symbol, data, value: value !== null ? value : 0 };
+    })
+    .sort((a, b) => b.value - a.value);
+});
 
 function getTokenIcon(symbol: string): string | undefined {
   const token = tokensStore.tokens.find(t => t.symbol === symbol)

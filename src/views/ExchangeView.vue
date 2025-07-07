@@ -28,12 +28,13 @@
           <thead class="bg-gray-50 dark:bg-gray-700">
             <tr>
               <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">場所</th>
+              <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">区分</th>
               <th scope="col" class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">評価額（JPY）</th>
             </tr>
           </thead>
           <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
             <tr v-if="exchangeData.length === 0">
-              <td colspan="2" class="px-6 py-12 text-center text-gray-500 dark:text-gray-400">データがありません</td>
+              <td colspan="3" class="px-6 py-12 text-center text-gray-500 dark:text-gray-400">データがありません</td>
             </tr>
             <tr
               v-for="item in exchangeData"
@@ -44,6 +45,9 @@
               <td class="px-6 py-4 whitespace-nowrap">
                 <div class="text-sm text-gray-900 dark:text-white">{{ getLocationName(item.locationId) }}</div>
               </td>
+              <td class="px-6 py-4 whitespace-nowrap">
+                <div class="text-sm text-gray-900 dark:text-white">{{ getLocationTypeLabel(item.locationId) }}</div>
+              </td>
               <td class="px-6 py-4 whitespace-nowrap text-right">
                 <div class="text-sm font-medium text-gray-900 dark:text-white">{{ formatCurrency(item.value) }}</div>
               </td>
@@ -52,7 +56,7 @@
           <!-- Total Footer -->
           <tfoot v-if="exchangeData.length > 0" class="bg-gray-50 dark:bg-gray-700 font-medium sticky bottom-0">
             <tr class="border-t border-gray-200 dark:border-gray-600">
-              <td class="px-6 py-4 text-sm text-gray-900 dark:text-white">合計評価額</td>
+              <td class="px-6 py-4 text-sm text-gray-900 dark:text-white" colspan="2">合計評価額</td>
               <td class="px-6 py-4 text-right text-lg font-bold text-gray-900 dark:text-white">{{ formatCurrency(totalValue) }}</td>
             </tr>
           </tfoot>
@@ -113,28 +117,60 @@ import { formatNumber, formatCurrency, formatPercentage, formatDate } from '@/ut
 const holdingsStore = useHoldingsStoreV2()
 const locationsStore = useLocationsStore()
 
+const locationTypeLabels: Record<LocationType, string> = {
+  domestic_cex: '国内取引所',
+  global_cex: '海外取引所',
+  sw_wallet: 'ソフトウェアウォレット',
+  hw_wallet: 'ハードウェアウォレット',
+  custom: 'カスタム'
+}
+
+// 区分ごとのソート順を定義
+const locationTypeOrder: Record<LocationType, number> = {
+  domestic_cex: 1,
+  global_cex: 2,
+  sw_wallet: 3,
+  hw_wallet: 4,
+  custom: 5,
+}
+
 function getLocationName(locationId: string): string {
   const location = locationsStore.locations.find(l => l.id === locationId)
   return location?.name || 'Unknown'
 }
 
+function getLocationTypeLabel(locationId: string): string {
+  const location = locationsStore.locations.find(l => l.id === locationId)
+  return location ? locationTypeLabels[location.type] : ''
+}
+
 // Exchange level aggregated data
 const exchangeData = computed(() => {
-  const map = new Map<string, { locationId: string; value: number }>()
+  const map = new Map<string, { locationId: string; value: number; type: LocationType; name: string }>()
   for (const holding of holdingsStore.holdings) {
     const price = holdingsStore.prices[holding.symbol]?.priceJpy
     if (!price) continue
     const holdingValue = holding.quantity * price
+    
+    const location = locationsStore.locations.find(l => l.id === holding.locationId)
+    if (!location) continue // 場所が見つからない場合はスキップ
+
     if (!map.has(holding.locationId)) {
-      map.set(holding.locationId, { locationId: holding.locationId, value: 0 })
+      map.set(holding.locationId, { locationId: holding.locationId, value: 0, type: location.type, name: location.name })
     }
     map.get(holding.locationId)!.value += holdingValue
   }
-  const orderMap: Record<string, number> = {}
-  locationsStore.locations.forEach((loc, idx) => {
-    orderMap[loc.id] = idx
-  })
-  return Array.from(map.values()).sort((a, b) => (orderMap[a.locationId] ?? 999) - (orderMap[b.locationId] ?? 999))
+  
+  return Array.from(map.values()).sort((a, b) => {
+    // 区分でソート
+    const typeOrderA = locationTypeOrder[a.type] ?? 999; // 未知のタイプは最後に
+    const typeOrderB = locationTypeOrder[b.type] ?? 999;
+    if (typeOrderA !== typeOrderB) {
+      return typeOrderA - typeOrderB;
+    }
+    // 同じ区分内では場所の名前でソート
+    return a.name.localeCompare(b.name);
+  });
 })
 
 const totalValue = computed(() => exchangeData.value.reduce((sum, item) => sum + item.value, 0))

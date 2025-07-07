@@ -53,7 +53,7 @@
               </td>
             </tr>
             
-            <tr v-for="holding in holdingsStore.holdings" :key="holding.id" class="hover:bg-gray-50 dark:hover:bg-gray-700">
+            <tr v-for="holding in sortedHoldings" :key="holding.id" class="hover:bg-gray-50 dark:hover:bg-gray-700">
               <!-- Location -->
               <td class="px-6 py-4 whitespace-nowrap">
                 <div class="text-sm text-gray-900 dark:text-white">
@@ -171,7 +171,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useHoldingsStoreV2 } from '@/stores/useHoldingsV2'
 import { useTokensStore } from '@/stores/useTokens'
 import { useLocationsStore } from '@/stores/useLocations'
@@ -186,6 +186,10 @@ const locationsStore = useLocationsStore()
 const showAddModal = ref(false)
 const editingHolding = ref<Holding | null>(null)
 const deletingHolding = ref<Holding | null>(null)
+
+const sortedHoldings = computed(() => {
+  return [...holdingsStore.holdings].sort((a, b) => a.symbol.localeCompare(b.symbol));
+});
 
 const locationTypeLabels: Record<LocationType, string> = {
   domestic_cex: '国内取引所',
