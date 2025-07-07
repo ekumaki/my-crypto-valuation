@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { dbService, type Token } from '@/services/db'
+import { dbV2, dbServiceV2, type Token } from '@/services/db-v2'
 import { coinGeckoService } from '@/services/coingecko'
 
 export const useTokensStore = defineStore('tokens', () => {
@@ -18,7 +18,16 @@ export const useTokensStore = defineStore('tokens', () => {
     try {
       isLoading.value = true
       error.value = null
-      tokens.value = await dbService.getTokens()
+      tokens.value = await dbV2.tokens.toArray()
+      
+      // アイコンが不足しているトークンがある場合は修復を実行
+      const tokensWithoutIcons = tokens.value.filter(token => !token.iconUrl)
+      if (tokensWithoutIcons.length > 0) {
+        console.log(`Found ${tokensWithoutIcons.length} tokens without icons, attempting repair...`)
+        await dbServiceV2.repairTokenIcons()
+        // 修復後に再読み込み
+        tokens.value = await dbV2.tokens.toArray()
+      }
     } catch (err) {
       error.value = 'トークンの読み込みに失敗しました'
       console.error('Failed to load tokens:', err)
@@ -37,8 +46,17 @@ export const useTokensStore = defineStore('tokens', () => {
         iconUrl: tokenData.iconUrl
       }
 
-      await dbService.addToken(token)
+      await dbServiceV2.addToken(token)
       await loadTokens()
+      
+      // データ変更時の自動同期をトリガー
+      try {
+        const { syncService } = await import('@/services/sync.service')
+        await syncService.triggerSyncOnDataChange()
+      } catch (error) {
+        console.warn('Failed to trigger sync on token add:', error)
+      }
+      
       return true
     } catch (err) {
       error.value = 'トークンの追加に失敗しました'
@@ -50,8 +68,17 @@ export const useTokensStore = defineStore('tokens', () => {
   async function removeToken(symbol: string) {
     try {
       error.value = null
-      await dbService.deleteToken(symbol)
+      await dbV2.tokens.delete(symbol)
       await loadTokens()
+      
+      // データ変更時の自動同期をトリガー
+      try {
+        const { syncService } = await import('@/services/sync.service')
+        await syncService.triggerSyncOnDataChange()
+      } catch (error) {
+        console.warn('Failed to trigger sync on token remove:', error)
+      }
+      
       return true
     } catch (err) {
       error.value = 'トークンの削除に失敗しました'

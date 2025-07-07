@@ -1,0 +1,80 @@
+import { createRouter, createWebHistory } from 'vue-router'
+import SummaryView from '@/views/SummaryView.vue'
+import EditView from '@/views/EditView.vue'
+import ExchangeView from '@/views/ExchangeView.vue'
+import { authService } from '@/services/auth.service'
+
+const router = createRouter({
+  history: createWebHistory(),
+  routes: [
+    {
+      path: '/',
+      redirect: '/edit'
+    },
+    {
+      path: '/login',
+      name: 'login',
+      component: () => import('@/components/LoginForm.vue'),
+      meta: {
+        title: 'ログイン',
+        requiresAuth: false
+      }
+    },
+    {
+      path: '/summary',
+      name: 'summary',
+      component: SummaryView,
+      meta: {
+        title: '銘柄別',
+        requiresAuth: true
+      }
+    },
+    {
+      path: '/edit',
+      name: 'edit', 
+      component: EditView,
+      meta: {
+        title: 'トークン一覧',
+        requiresAuth: true
+      }
+    },
+    {
+      path: '/exchange',
+      name: 'exchange',
+      component: ExchangeView,
+      meta: {
+        title: '取引所別',
+        requiresAuth: true
+      }
+    }
+  ]
+})
+
+router.beforeEach(async (to, from, next) => {
+  console.log('[DEBUG] Router guard - navigating to:', to.path)
+  
+  const requiresAuth = to.meta.requiresAuth !== false
+  let isAuthenticated = false
+  
+  try {
+    isAuthenticated = await authService.isAuthenticated()
+  } catch (error) {
+    console.error('[DEBUG] Router guard - auth check failed:', error)
+    isAuthenticated = false
+  }
+  
+  console.log('[DEBUG] Router guard - requiresAuth:', requiresAuth, 'isAuthenticated:', isAuthenticated)
+  
+  if (requiresAuth && !isAuthenticated) {
+    console.log('[DEBUG] Router guard - redirecting to /login')
+    next('/login')
+  } else if (to.name === 'login' && isAuthenticated) {
+    console.log('[DEBUG] Router guard - redirecting to /summary')
+    next('/summary')
+  } else {
+    console.log('[DEBUG] Router guard - allowing navigation')
+    next()
+  }
+})
+
+export default router

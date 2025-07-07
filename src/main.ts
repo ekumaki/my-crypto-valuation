@@ -1,13 +1,17 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
+import router from './router'
 import App from './App.vue'
 import './style.css'
 
-const app = createApp(App)
-const pinia = createPinia()
+async function initializeApp() {
+  const app = createApp(App)
+  app.use(createPinia())
+  app.use(router)
+  app.mount('#app')
+}
 
-app.use(pinia)
-app.mount('#app')
+initializeApp().catch(console.error)
 
 // Register service worker for PWA
 if ('serviceWorker' in navigator) {
