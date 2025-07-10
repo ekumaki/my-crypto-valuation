@@ -255,9 +255,17 @@ class SyncService {
       // 自動同期を開始
       this.startAutoSync()
 
-      // 即座に同期を実行
+      // ローカルデータ件数を確認して競合検出をスキップするか判定
+      const { secureStorage } = await import('@/services/storage.service')
+      const localHoldings = await secureStorage.getHoldings()
+      const skipConflictDetection = localHoldings.length === 0
+      
       console.log('[DEBUG] enableSync - performing initial sync')
-      const syncResult = await this.performSync()
+      console.log('[DEBUG] enableSync - local holdings count:', localHoldings.length)
+      console.log('[DEBUG] enableSync - skip conflict detection:', skipConflictDetection)
+      
+      // 競合検出をスキップして同期実行（ローカルデータ0件時）
+      const syncResult = await this.performSync({ skipConflictDetection })
       
       if (!syncResult.success && !syncResult.conflictData) {
         // 競合以外のエラーの場合は同期を無効化
@@ -309,9 +317,12 @@ class SyncService {
       // 自動同期を開始
       this.startAutoSync()
 
-      // 即座に同期を実行
+      // 新規ユーザーの場合は常に競合検出をスキップ
       console.log('[DEBUG] enableSyncForNewUser - performing initial sync')
-      const syncResult = await this.performSync()
+      console.log('[DEBUG] enableSyncForNewUser - skip conflict detection: true (new user)')
+      
+      // 競合検出をスキップして同期実行（新規ユーザー）
+      const syncResult = await this.performSync({ skipConflictDetection: true })
       
       if (!syncResult.success && !syncResult.conflictData) {
         // 競合以外のエラーの場合は同期を無効化
@@ -446,11 +457,21 @@ class SyncService {
       let syncMessage: string
 
       if (options.skipConflictDetection) {
-        // 競合検出をスキップした場合は常にローカルデータを優先
-        console.log('[DEBUG] performSync - local data priority mode, uploading to cloud')
-        finalData = localData
-        await this.uploadToCloud(finalData)
-        syncMessage = 'ローカルデータをクラウドにアップロードしました'
+        // 競合検出をスキップした場合の処理
+        const localHoldings = localData.holdings || []
+        if (localHoldings.length === 0) {
+          // ローカル保有データが0件の場合はクラウドデータを優先
+          console.log('[DEBUG] performSync - local holdings empty, downloading cloud data')
+          finalData = cloudData.portfolioData
+          await this.updateLocalData(finalData)
+          syncMessage = 'クラウドデータをローカルに取得しました'
+        } else {
+          // ローカル保有データがある場合はローカルデータを優先
+          console.log('[DEBUG] performSync - local data priority mode, uploading to cloud')
+          finalData = localData
+          await this.uploadToCloud(finalData)
+          syncMessage = 'ローカルデータをクラウドにアップロードしました'
+        }
       } else if (cloudData.timestamp > localTimestamp) {
         // クラウドデータが新しい場合
         console.log('[DEBUG] performSync - cloud data is newer, updating local data')
@@ -657,25 +678,66 @@ class SyncService {
   }
 
   private async detectConflict(localData: any, cloudData: CloudBackupData, localTimestamp: number): Promise<boolean> {
-    // Conflict detection based on meaningful data differences
-    const timeDiff = Math.abs(localTimestamp - cloudData.timestamp)
-    
     console.log('[DEBUG] Conflict detection:')
     console.log('  Local timestamp:', new Date(localTimestamp).toISOString())
     console.log('  Cloud timestamp:', new Date(cloudData.timestamp).toISOString())
-    console.log('  Time difference (ms):', timeDiff)
     
-    // Check for meaningful data differences regardless of timestamp
-    const localHash = this.createDataHash(localData)
-    const cloudHash = this.createDataHash(cloudData.portfolioData)
+    // ローカルの保有データが0件の場合は競合なし（初回同期として扱う）
+    const localHoldings = localData.holdings || []
+    if (localHoldings.length === 0) {
+      console.log('  Local holdings count: 0 - treating as initial sync, no conflict')
+      return false
+    }
     
-    console.log('  Local data hash:', localHash)
-    console.log('  Cloud data hash:', cloudHash)
+    console.log('  Local holdings count:', localHoldings.length)
+    console.log('  Cloud holdings count:', (cloudData.portfolioData.holdings || []).length)
     
-    const hasConflict = localHash !== cloudHash
+    // 保有データのみで競合判定（保管場所・トークンは除外）
+    const localHoldingsHash = this.createHoldingsHash(localHoldings)
+    const cloudHoldingsHash = this.createHoldingsHash(cloudData.portfolioData.holdings || [])
+    
+    console.log('  Local holdings hash:', localHoldingsHash)
+    console.log('  Cloud holdings hash:', cloudHoldingsHash)
+    
+    const hasConflict = localHoldingsHash !== cloudHoldingsHash
     console.log('  Conflict detected:', hasConflict)
     
     return hasConflict
+  }
+  
+  private createHoldingsHash(holdings: any[]): string {
+    // 保有データのみでハッシュを生成（保管場所・トークンは除外）
+    const normalized = (holdings || [])
+      .filter((h: any) => h && h.symbol && h.quantity != null && h.quantity > 0) // 有効な保有データのみ
+      .map((h: any) => ({
+        symbol: h.symbol?.toUpperCase()?.trim() || '',
+        quantity: Math.round(parseFloat((h.quantity || 0).toString()) * 100000000) / 100000000, // 8桁精度
+        locationId: (h.locationId || '').toString().trim(),
+        note: (h.note || '').trim()
+      }))
+      .sort((a: any, b: any) => {
+        const symbolCompare = a.symbol.localeCompare(b.symbol)
+        if (symbolCompare !== 0) return symbolCompare
+        const locationCompare = a.locationId.localeCompare(b.locationId)
+        if (locationCompare !== 0) return locationCompare
+        return a.quantity - b.quantity
+      })
+    
+    const dataString = JSON.stringify(normalized, null, 0)
+    console.log('[DEBUG] createHoldingsHash - holdings count:', normalized.length)
+    console.log('[DEBUG] createHoldingsHash - data preview:', dataString.substring(0, 200) + '...')
+    
+    // Simple hash function
+    let hash = 0
+    for (let i = 0; i < dataString.length; i++) {
+      const char = dataString.charCodeAt(i)
+      hash = ((hash << 5) - hash) + char
+      hash = hash & hash // Convert to 32-bit integer
+    }
+    
+    const hashString = hash.toString(16)
+    console.log('[DEBUG] createHoldingsHash - result:', hashString)
+    return hashString
   }
   
   private createDataHash(data: any): string {

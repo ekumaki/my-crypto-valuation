@@ -130,7 +130,7 @@ import TimeoutWarning from '@/components/TimeoutWarning.vue'
 import SyncSettings from '@/components/SyncSettings.vue'
 import ConflictResolver from '@/components/ConflictResolver.vue'
 import { useSessionStore } from '@/stores/session.store'
-import { syncService } from '@/services/sync.service'
+import { syncService } from '@/services/sync'
 
 const router = useRouter()
 const sessionStore = useSessionStore()

@@ -18,6 +18,9 @@ class GoogleAuthService {
   private authInstance: any = null
   private gapiLoaded = false
   private accessToken: string | null = null
+  private authRetryCount = 0
+  private maxAuthRetries = 3
+  private authRetryDelay = 1000
 
   constructor() {
     this.loadPersistedAuthState()
@@ -57,11 +60,16 @@ class GoogleAuthService {
         })
       })
 
-      // Initialize the API client
-      await (window as any).gapi.client.init({
-        apiKey: GOOGLE_DRIVE_CONFIG.apiKey,
-        discoveryDocs: [GOOGLE_DRIVE_CONFIG.discoveryDoc]
-      })
+      // Initialize the API client (without API key for now)
+      try {
+        await (window as any).gapi.client.init({
+          discoveryDocs: [GOOGLE_DRIVE_CONFIG.discoveryDoc]
+        })
+      } catch (error) {
+        console.warn('Failed to load discovery docs, continuing without them:', error)
+        // Continue without discovery docs - OAuth will still work
+        await (window as any).gapi.client.init({})
+      }
 
       // Initialize Google Identity Services
       ;(window as any).google.accounts.id.initialize({
@@ -141,9 +149,18 @@ class GoogleAuthService {
 
   private async handleTokenResponse(response: any): Promise<void> {
     console.log('OAuth token received:', response)
+    
+    // エラーレスポンスの処理
+    if (response.error) {
+      console.error('OAuth error:', response.error)
+      this._error.value = this.getAuthErrorMessage(response)
+      return
+    }
+    
     if (response.access_token) {
       // Store access token
       this.accessToken = response.access_token
+      this.authRetryCount = 0 // リセット成功時
       
       // Set access token for gapi client
       ;(window as any).gapi.client.setToken({ access_token: response.access_token })
@@ -234,23 +251,108 @@ class GoogleAuthService {
   }
 
   async signIn(): Promise<void> {
+    return this.performAuthWithRetry()
+  }
+  
+  // 認証をリトライ機能付きで実行
+  private async performAuthWithRetry(): Promise<void> {
+    if (this.authRetryCount >= this.maxAuthRetries) {
+      throw new Error('認証の最大試行回数に達しました。ページを再読み込みしてください。')
+    }
+    
     try {
       this._isLoading.value = true
       this._error.value = null
+      this.authRetryCount++
 
       if (!this.authInstance) {
         throw new Error('Google Auth not initialized')
       }
 
-      // Request OAuth token
-      this.authInstance.requestAccessToken()
-    } catch (error) {
-      console.error('Sign in failed:', error)
-      this._error.value = ERROR_MESSAGES.AUTH_FAILED
+      // Request OAuth token with error handling
+      await new Promise<void>((resolve, reject) => {
+        const originalCallback = this.authInstance.callback
+        
+        const wrappedCallback = (response: any) => {
+          try {
+            // Cross-Origin-Opener-Policy エラーの検出
+            if (response.error === 'popup_closed_by_user') {
+              reject(new Error('認証がユーザーによってキャンセルされました'))
+              return
+            }
+            
+            if (response.error === 'access_denied') {
+              reject(new Error('Google Drive へのアクセスが拒否されました'))
+              return
+            }
+            
+            if (response.error) {
+              reject(new Error(`認証エラー: ${response.error}`))
+              return
+            }
+            
+            // 正常な処理を実行
+            this.handleTokenResponse(response)
+            
+            if (response.access_token) {
+              resolve()
+            } else {
+              reject(new Error('アクセストークンの取得に失敗しました'))
+            }
+          } catch (error) {
+            reject(error)
+          }
+        }
+        
+        this.authInstance.callback = wrappedCallback
+        
+        // タイムアウト処理
+        const timeout = setTimeout(() => {
+          this.authInstance.callback = originalCallback
+          reject(new Error('認証がタイムアウトしました'))
+        }, 30000) // 30秒タイムアウト
+        
+        try {
+          this.authInstance.requestAccessToken()
+        } catch (error) {
+          clearTimeout(timeout)
+          this.authInstance.callback = originalCallback
+          reject(error)
+        }
+        
+        // 成功またはエラー時にタイムアウトをクリア
+        const clearTimeoutOnComplete = () => {
+          clearTimeout(timeout)
+          this.authInstance.callback = originalCallback
+        }
+        
+        // Promise の完了時にクリーンアップ
+        Promise.resolve().then(clearTimeoutOnComplete, clearTimeoutOnComplete)
+      })
+      
+    } catch (error: any) {
+      console.error(`Sign in attempt ${this.authRetryCount} failed:`, error)
+      
+      // 特定のエラーの場合はリトライ
+      if (this.shouldRetryAuth(error) && this.authRetryCount < this.maxAuthRetries) {
+        console.log(`Retrying authentication in ${this.authRetryDelay}ms...`)
+        await new Promise(resolve => setTimeout(resolve, this.authRetryDelay))
+        this.authRetryDelay *= 2 // 指数バックオフ
+        return this.performAuthWithRetry()
+      }
+      
+      this._error.value = this.getAuthErrorMessage(error)
       throw error
     } finally {
       this._isLoading.value = false
     }
+  }
+  
+  private shouldRetryAuth(error: any): boolean {
+    // ネットワークエラーやタイムアウトの場合はリトライ
+    return error.message?.includes('network') || 
+           error.message?.includes('timeout') ||
+           error.message?.includes('タイムアウト')
   }
 
   async signOut(): Promise<void> {
@@ -345,13 +447,19 @@ class GoogleAuthService {
         throw new Error('Google Auth not initialized')
       }
 
-      // OAuth認証を開始
+      // OAuth認証を開始（リトライ機能付き）
       return new Promise((resolve, reject) => {
         // コールバックを一時的に変更して認証完了を検知
         const tempCallback = async (response: any) => {
           try {
+            // エラーレスポンスの処理
+            if (response.error) {
+              reject(new Error(this.getAuthErrorMessage(response)))
+              return
+            }
+            
             // 元のトークン処理を実行
-            this.handleTokenResponse(response)
+            await this.handleTokenResponse(response)
             
             if (response.access_token) {
               // 認証成功後、ファイル存在チェックを実行
@@ -371,9 +479,19 @@ class GoogleAuthService {
           }
         }
         
-        // 一時的にコールバックを設定
-        this.authInstance.callback = tempCallback
-        this.authInstance.requestAccessToken()
+        // タイムアウト処理
+        const timeout = setTimeout(() => {
+          reject(new Error('認証がタイムアウトしました'))
+        }, 30000)
+        
+        try {
+          // 一時的にコールバックを設定
+          this.authInstance.callback = tempCallback
+          this.authInstance.requestAccessToken()
+        } catch (error) {
+          clearTimeout(timeout)
+          reject(error)
+        }
       })
 
     } catch (error: any) {
@@ -389,13 +507,25 @@ class GoogleAuthService {
     if (error.error === 'access_denied') {
       return 'Google Drive との連携が必要です\nデータの同期にはファイル保存権限が必要です'
     }
+    if (error.error === 'popup_closed_by_user') {
+      return '認証がキャンセルされました\n認証を完了するには、ポップアップを許可してください'
+    }
     if (error.error === 'network_error' || error.message?.includes('network')) {
       return 'ネットワークエラーが発生しました\n接続を確認して再試行してください'
     }
     if (error.message?.includes('Client ID')) {
       return 'Google Client ID が設定されていません\n.envファイルを確認してください'
     }
-    return '認証エラーが発生しました'
+    if (error.message?.includes('Cross-Origin-Opener-Policy')) {
+      return 'ブラウザのセキュリティ設定により認証に失敗しました\nページを再読み込みしてください'
+    }
+    if (error.message?.includes('タイムアウト') || error.message?.includes('timeout')) {
+      return '認証がタイムアウトしました\n再度お試しください'
+    }
+    if (error.message?.includes('最大試行回数')) {
+      return error.message
+    }
+    return `認証エラーが発生しました: ${error.message || '不明なエラー'}`
   }
 }
 

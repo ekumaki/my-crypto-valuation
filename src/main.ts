@@ -13,8 +13,8 @@ async function initializeApp() {
 
 initializeApp().catch(console.error)
 
-// Register service worker for PWA
-if ('serviceWorker' in navigator) {
+// Register service worker for PWA (temporarily disabled for development)
+if ('serviceWorker' in navigator && import.meta.env.PROD) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js')
       .then((registration) => {
