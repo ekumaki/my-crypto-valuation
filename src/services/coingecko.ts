@@ -28,17 +28,66 @@ export interface CoinGeckoExchangeRate {
 const BASE_URL = import.meta.env.DEV ? '/api' : 'https://api.coingecko.com/api/v3'
 
 class CoinGeckoService {
-  private async fetchAPI<T>(endpoint: string): Promise<T> {
-    try {
-      const response = await fetch(`${BASE_URL}${endpoint}`)
-      if (!response.ok) {
-        throw new Error(`CoinGecko API error: ${response.status}`)
+  private requestQueue: Array<() => Promise<any>> = []
+  private isProcessing = false
+  private lastRequestTime = 0
+  private readonly REQUEST_DELAY = 100 // 100ms between requests
+
+  private async processQueue() {
+    if (this.isProcessing || this.requestQueue.length === 0) return
+    
+    this.isProcessing = true
+    
+    while (this.requestQueue.length > 0) {
+      const request = this.requestQueue.shift()!
+      
+      // レート制限を実装
+      const timeSinceLastRequest = Date.now() - this.lastRequestTime
+      if (timeSinceLastRequest < this.REQUEST_DELAY) {
+        await new Promise(resolve => setTimeout(resolve, this.REQUEST_DELAY - timeSinceLastRequest))
       }
-      return await response.json()
-    } catch (error) {
-      console.error('CoinGecko API fetch error:', error)
-      throw error
+      
+      try {
+        await request()
+      } catch (error) {
+        console.error('Queue request failed:', error)
+      }
+      
+      this.lastRequestTime = Date.now()
     }
+    
+    this.isProcessing = false
+  }
+
+  private async fetchAPI<T>(endpoint: string): Promise<T> {
+    return new Promise((resolve, reject) => {
+      const request = async () => {
+        try {
+          const response = await fetch(`${BASE_URL}${endpoint}`)
+          if (!response.ok) {
+            if (response.status === 429) {
+              // 429エラーの場合は待機して再試行
+              await new Promise(resolve => setTimeout(resolve, 1000))
+              const retryResponse = await fetch(`${BASE_URL}${endpoint}`)
+              if (!retryResponse.ok) {
+                throw new Error(`CoinGecko API error: ${retryResponse.status}`)
+              }
+              resolve(await retryResponse.json())
+            } else {
+              throw new Error(`CoinGecko API error: ${response.status}`)
+            }
+          } else {
+            resolve(await response.json())
+          }
+        } catch (error) {
+          console.error('CoinGecko API fetch error:', error)
+          reject(error)
+        }
+      }
+      
+      this.requestQueue.push(request)
+      this.processQueue()
+    })
   }
 
   async searchTokens(query: string): Promise<CoinGeckoToken[]> {

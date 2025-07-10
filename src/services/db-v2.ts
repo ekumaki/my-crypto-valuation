@@ -1,39 +1,6 @@
 import Dexie, { Table } from 'dexie'
-
-// Location types
-export type LocationType = 'domestic_cex' | 'global_cex' | 'sw_wallet' | 'hw_wallet' | 'custom'
-
-export interface Location {
-  id: string
-  name: string
-  type: LocationType
-  isCustom: boolean
-}
-
-export interface Holding {
-  id: string
-  locationId: string
-  symbol: string
-  quantity: number
-  note?: string
-  createdAt: number
-  updatedAt: number
-}
-
-export interface Price {
-  symbol: string
-  date: string
-  priceJpy: number
-  fxRate?: number
-  fetchedAt: number
-}
-
-export interface Token {
-  symbol: string
-  name: string
-  id: string
-  iconUrl?: string
-}
+import { DATABASE_CONFIG } from '@/config/database.config'
+import type { Location, Holding, Price, Token } from '@/types/database'
 
 export class CryptoPortfolioDBV2 extends Dexie {
   locations!: Table<Location>
@@ -92,9 +59,31 @@ export class CryptoPortfolioDBV2 extends Dexie {
 
     this.on('populate', () => this.populate())
   }
-
+  
   private async populate() {
     // This is now handled by metadataService.forceResetAllMetadata
+  }
+  
+  // データベース接続を確認
+  async ensureConnection(): Promise<void> {
+    try {
+      if (!this.isOpen()) {
+        await this.open()
+      }
+    } catch (error) {
+      console.error('[DB] Failed to ensure connection:', error)
+      throw error
+    }
+  }
+
+  // 安全なデータベース操作ラッパー
+  async safeOperation<T>(operation: () => Promise<T>): Promise<T> {
+    try {
+      return await operation()
+    } catch (error: any) {
+      console.error('[DB] Operation failed:', error)
+      throw error
+    }
   }
 }
 
@@ -291,10 +280,23 @@ export const dbServiceV2 = {
 
   // Clear all data (for testing)
   async clearAllData(): Promise<void> {
-    await dbV2.transaction('rw', dbV2.holdings, dbV2.prices, async () => {
-      await dbV2.holdings.clear()
-      await dbV2.prices.clear()
-    })
+    console.log('[DB] Clearing all data...')
+    try {
+      await dbV2.ensureConnection()
+      await dbV2.transaction('rw', dbV2.holdings, dbV2.prices, async () => {
+        await dbV2.holdings.clear()
+        await dbV2.prices.clear()
+      })
+      console.log('[DB] All data cleared successfully')
+    } catch (error) {
+      console.error('[DB] Failed to clear data:', error)
+      // データベースが閉じられている場合は無視
+      if (error.name === 'DatabaseClosedError') {
+        console.log('[DB] Database already closed, skipping clear operation')
+      } else {
+        throw error
+      }
+    }
   },
 
   // データベースの強制アップグレード

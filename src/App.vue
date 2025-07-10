@@ -3,11 +3,6 @@
     <!-- Session Timeout Warning -->
     <TimeoutWarning />
     
-
-    
-
-
-
     <!-- Login Screen (first time login or logged out) -->
     <LoginForm v-if="!sessionStore.isAuthenticated" @login-success="handleLoginSuccess" />
     
@@ -115,8 +110,6 @@
       </div>
     </div>
     
-
-    
     <!-- Conflict Resolver Modal -->
     <ConflictResolver
       v-if="syncService.status.value.conflictDetected && syncService.conflictData.value"
@@ -137,13 +130,12 @@ import TimeoutWarning from '@/components/TimeoutWarning.vue'
 import SyncSettings from '@/components/SyncSettings.vue'
 import ConflictResolver from '@/components/ConflictResolver.vue'
 import { useSessionStore } from '@/stores/session.store'
-import { syncService } from '@/services/sync.service'
+import { syncService } from '@/services/sync'
 
 const router = useRouter()
 const sessionStore = useSessionStore()
 const isDark = ref(document.documentElement.classList.contains('dark'))
 const showSyncSettings = ref(false)
-
 
 // Watch for authentication state changes
 watch(() => sessionStore.isAuthenticated, (newValue, oldValue) => {
@@ -155,7 +147,6 @@ watch(() => sessionStore.isAuthenticated, (newValue, oldValue) => {
     router.push('/edit')
   }
 })
-
 
 function toggleDarkMode() {
   isDark.value = !isDark.value
@@ -180,8 +171,6 @@ async function handleLoginSuccess() {
   router.push('/edit')
   console.log('[DEBUG] Navigation to /edit completed')
 }
-
-
 
 function handleConflictClose() {
   // 競合をクリアして閉じる処理は不要（ConflictResolver内で処理される）

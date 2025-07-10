@@ -16,9 +16,12 @@ export interface AuthState {
 
 export class SecureStorageService {
   private encryptionKey: CryptoKey | null = null
+  private keyRecoveryAttempts = 0
+  private maxKeyRecoveryAttempts = 3
   
   setEncryptionKey(key: CryptoKey) {
     this.encryptionKey = key
+    this.keyRecoveryAttempts = 0
   }
   
   getEncryptionKey(): CryptoKey | null {
@@ -27,10 +30,41 @@ export class SecureStorageService {
   
   clearEncryptionKey() {
     this.encryptionKey = null
+    this.keyRecoveryAttempts = 0
   }
   
   isUnlocked(): boolean {
     return this.encryptionKey !== null
+  }
+  
+  // 暗号化キーの自動復元を試行
+  async tryRecoverEncryptionKey(): Promise<boolean> {
+    if (this.encryptionKey || this.keyRecoveryAttempts >= this.maxKeyRecoveryAttempts) {
+      return this.encryptionKey !== null
+    }
+    
+    this.keyRecoveryAttempts++
+    
+    try {
+      // Google認証サービスから暗号化キーを取得
+      const { googleAuthService } = await import('./google-auth.service')
+      const { authService } = await import('./auth.service')
+      
+      if (googleAuthService.isAuthenticated.value) {
+        console.log('[DEBUG] Attempting to recover encryption key from Google auth...')
+        const result = await authService.setupEncryptionFromGoogleAuth()
+        if (result.success) {
+          console.log('[DEBUG] Encryption key recovered successfully')
+          return true
+        }
+      }
+      
+      console.log('[DEBUG] Encryption key recovery failed')
+      return false
+    } catch (error) {
+      console.error('[DEBUG] Encryption key recovery error:', error)
+      return false
+    }
   }
   
   private async encryptField(value: string): Promise<string> {
@@ -84,7 +118,11 @@ export class SecureStorageService {
   
   async addHolding(holding: Omit<Holding, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> {
     if (!this.isUnlocked()) {
-      throw new Error('Storage is locked')
+      // 暗号化キーの自動復元を試行
+      const recovered = await this.tryRecoverEncryptionKey()
+      if (!recovered) {
+        throw new Error('Storage is locked and key recovery failed')
+      }
     }
     
     const now = Date.now()
@@ -136,7 +174,11 @@ export class SecureStorageService {
   
   async updateHolding(id: string, updates: Partial<Omit<Holding, 'id' | 'createdAt'>>): Promise<number> {
     if (!this.isUnlocked()) {
-      throw new Error('Storage is locked')
+      // 暗号化キーの自動復元を試行
+      const recovered = await this.tryRecoverEncryptionKey()
+      if (!recovered) {
+        throw new Error('Storage is locked and key recovery failed')
+      }
     }
     
     const encryptedUpdates: any = {
@@ -186,7 +228,11 @@ export class SecureStorageService {
   
   async deleteHolding(id: string): Promise<void> {
     if (!this.isUnlocked()) {
-      throw new Error('Storage is locked')
+      // 暗号化キーの自動復元を試行
+      const recovered = await this.tryRecoverEncryptionKey()
+      if (!recovered) {
+        throw new Error('Storage is locked and key recovery failed')
+      }
     }
     
     // Update metadata for sync tracking before deletion
@@ -216,7 +262,11 @@ export class SecureStorageService {
   
   async getHoldings(): Promise<Holding[]> {
     if (!this.isUnlocked()) {
-      throw new Error('Storage is locked')
+      // 暗号化キーの自動復元を試行
+      const recovered = await this.tryRecoverEncryptionKey()
+      if (!recovered) {
+        throw new Error('Storage is locked and key recovery failed')
+      }
     }
     
     console.log('[DEBUG] getHoldings - fetching from database...')
@@ -259,7 +309,11 @@ export class SecureStorageService {
   
   async getHoldingsByLocation(locationId: string): Promise<Holding[]> {
     if (!this.isUnlocked()) {
-      throw new Error('Storage is locked')
+      // 暗号化キーの自動復元を試行
+      const recovered = await this.tryRecoverEncryptionKey()
+      if (!recovered) {
+        throw new Error('Storage is locked and key recovery failed')
+      }
     }
     
     const allHoldings = await this.getHoldings()
@@ -355,11 +409,11 @@ export class SecureStorageService {
   }
   
   async clearAllData(): Promise<void> {
-    if (!this.isUnlocked()) {
-      throw new Error('Storage is locked')
-    }
-    
+    // データクリア時は暗号化キーの状態に関係なく実行
+    // ログアウト時のクリーンアップを可能にする
+    console.log('[DEBUG] clearAllData - clearing database data...')
     await dbServiceV2.clearAllData()
+    console.log('[DEBUG] clearAllData - database data cleared successfully')
   }
   
   async clearAllDataForNewUser(): Promise<void> {
@@ -402,8 +456,15 @@ export class SecureStorageService {
   }
   
   async clearAuthState(): Promise<void> {
+    console.log('[DEBUG] clearAuthState - starting cleanup...')
     localStorage.removeItem('crypto-portfolio-auth')
+    
+    // 認証状態クリア時は暗号化キーもクリア
+    this.clearEncryptionKey()
+    
+    // データベースクリア（ロック状態に関係なく）
     await this.clearAllData()
+    console.log('[DEBUG] clearAuthState - cleanup completed')
   }
 
   async forceReset(): Promise<void> {

@@ -92,7 +92,7 @@
 import { ref } from 'vue'
 import { googleAuthService } from '@/services/google-auth.service'
 import { authService } from '@/services/auth.service'
-import { syncService } from '@/services/sync.service'
+import { syncService } from '@/services/sync'
 
 const emit = defineEmits<{
   loginSuccess: []
@@ -147,6 +147,7 @@ async function handleGoogleAuth() {
     isLoading.value = false
   }
 }
+
 
 async function handleReset() {
   try {

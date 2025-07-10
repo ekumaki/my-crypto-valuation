@@ -13,6 +13,7 @@ export const useSessionStore = defineStore('session', () => {
   const remainingTime = ref(0)
   const warningTimer = ref<number | null>(null)
   const sessionStartTime = ref<number>(0)
+  const storageUnlocked = ref(false)
   
   const isLocked = computed(() => !isAuthenticated.value)
   
@@ -100,22 +101,23 @@ export const useSessionStore = defineStore('session', () => {
         // セッション開始時間を復元
         const savedStartTime = loadSessionStartTime()
         if (savedStartTime > 0) {
-          sessionStartTime.value = savedStartTime
-          console.log('[DEBUG] Restored session start time:', new Date(savedStartTime))
-          
-          // 復元した時間を基に残り時間を計算
           const totalSessionTime = 30 * 60 * 1000 // 30 minutes
           const elapsedTime = Date.now() - savedStartTime
           const newRemainingTime = Math.max(0, totalSessionTime - elapsedTime)
-          remainingTime.value = newRemainingTime
           
+          console.log('[DEBUG] Restored session start time:', new Date(savedStartTime))
           console.log('[DEBUG] Calculated remaining time on restore:', newRemainingTime / 1000, 'seconds')
           
-          // セッションが期限切れの場合はログアウト
+          // セッションが期限切れの場合は新しいセッションを開始
           if (newRemainingTime <= 0) {
-            console.log('[DEBUG] Session expired during restore, logging out')
-            await logout()
-            return
+            console.log('[DEBUG] Session expired during restore, clearing old session and starting fresh')
+            clearSessionStartTime()
+            sessionStartTime.value = Date.now()
+            saveSessionStartTime(sessionStartTime.value)
+            remainingTime.value = totalSessionTime
+          } else {
+            sessionStartTime.value = savedStartTime
+            remainingTime.value = newRemainingTime
           }
         }
         
@@ -126,9 +128,11 @@ export const useSessionStore = defineStore('session', () => {
         if (!secureStorage.isUnlocked() && !autoUnlockSuccess) {
           console.log('[DEBUG] Authentication exists but storage is locked and auto unlock failed - showing unlock prompt')
           showUnlockPrompt.value = true
+          storageUnlocked.value = false
         } else {
           console.log('[DEBUG] Storage is already unlocked or auto unlock succeeded')
           showUnlockPrompt.value = false
+          storageUnlocked.value = true
         }
         
         // セッションタイマーを開始
@@ -164,12 +168,15 @@ export const useSessionStore = defineStore('session', () => {
       const { secureStorage } = await import('@/services/storage.service')
       if (secureStorage.isUnlocked()) {
         console.log('[DEBUG] login - storage is unlocked and ready')
+        storageUnlocked.value = true
       } else {
         console.log('[DEBUG] login - storage is not unlocked, attempting auto unlock')
-        await attemptAutoUnlock()
+        const unlockSuccess = await attemptAutoUnlock()
+        storageUnlocked.value = unlockSuccess
       }
     } catch (error) {
       console.error('[DEBUG] login - failed to verify storage state:', error)
+      storageUnlocked.value = false
     }
     
     setupActivityListeners()
@@ -185,6 +192,7 @@ export const useSessionStore = defineStore('session', () => {
     showWarning.value = false
     isAuthenticated.value = false
     sessionStartTime.value = 0
+    storageUnlocked.value = false
     clearSessionStartTime() // ローカルストレージからも削除
 
     await authService.logout()
@@ -577,6 +585,7 @@ export const useSessionStore = defineStore('session', () => {
     remainingMinutes,
     remainingSeconds,
     remainingDisplay,
+    storageUnlocked,
     initialize,
     login,
     logout,

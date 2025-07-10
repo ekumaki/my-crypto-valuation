@@ -17,68 +17,158 @@ export class AuthService {
   
   // Google認証からの暗号化キー設定
   async setupEncryptionFromGoogleAuth(): Promise<LoginResult> {
-    try {
-      // Google認証状態をチェック
-      if (!googleAuthService.isAuthenticated.value || !googleAuthService.user.value) {
-        return {
-          success: false,
-          error: 'Google認証が必要です'
-        }
-      }
-
-      const user = googleAuthService.user.value
-      if (!user.id || !user.email) {
-        return {
-          success: false,
-          error: 'Google認証情報が不完全です'
-        }
-      }
-
-      // Google認証情報から暗号化キーを生成
-      const encryptionKey = await CryptoService.deriveKeyFromGoogleAuth(user.id, user.email)
+    const maxRetries = 3
+    let attempts = 0
+    
+    while (attempts < maxRetries) {
+      attempts++
+      console.log(`[AuthService] setupEncryptionFromGoogleAuth attempt ${attempts}/${maxRetries}`)
       
-      // 暗号化キーを設定
-      secureStorage.setEncryptionKey(encryptionKey)
-      
-      // 認証状態を設定（パスワードハッシュは不要）
-      await secureStorage.setAuthState({
-        isAuthenticated: true
-      })
-      
-      // 暗号化されていないデータがあれば移行
-      await secureStorage.migrateUnencryptedData()
-      
-      // 初期データを確実に同期済みとしてマーク
       try {
-        const { metadataService } = await import('./metadata.service')
-        await metadataService.forceResetAllMetadata()
-        console.log('[DEBUG] setupEncryptionFromGoogleAuth - initial data marked as synced')
-      } catch (error) {
-        console.warn('[DEBUG] setupEncryptionFromGoogleAuth - failed to mark initial data as synced:', error)
+        // Google認証状態をチェック
+        if (!googleAuthService.isAuthenticated.value || !googleAuthService.user.value) {
+          return {
+            success: false,
+            error: 'Google認証が必要です'
+          }
+        }
+
+        const user = googleAuthService.user.value
+        if (!user.id || !user.email) {
+          return {
+            success: false,
+            error: 'Google認証情報が不完全です'
+          }
+        }
+
+        // データベース接続を確認
+        const { dbV2 } = await import('./db-v2')
+        await dbV2.ensureConnection()
+        console.log('[AuthService] Database connection verified')
+
+        // Google認証情報から暗号化キーを生成
+        const encryptionKey = await CryptoService.deriveKeyFromGoogleAuth(user.id, user.email)
+        
+        // 暗号化キーを設定
+        secureStorage.setEncryptionKey(encryptionKey)
+        console.log('[AuthService] Encryption key set successfully')
+        
+        // 認証状態を設定（パスワードハッシュは不要）
+        await secureStorage.setAuthState({
+          isAuthenticated: true
+        })
+        console.log('[AuthService] Auth state set successfully')
+        
+        // 暗号化されていないデータがあれば移行
+        try {
+          await secureStorage.migrateUnencryptedData()
+          console.log('[AuthService] Unencrypted data migration completed')
+        } catch (migrationError) {
+          console.warn('[AuthService] Data migration failed, continuing...', migrationError)
+          // 移行失敗でも続行
+        }
+        
+        // 初期データを確実に同期済みとしてマーク
+        try {
+          const { metadataService } = await import('./metadata.service')
+          await metadataService.forceResetAllMetadata()
+          console.log('[AuthService] Initial data marked as synced')
+        } catch (error) {
+          console.warn('[AuthService] Failed to mark initial data as synced:', error)
+        }
+        
+        // 同期サービスを有効化
+        try {
+          const { syncService } = await import('./sync.service')
+          await syncService.enableSync()
+          console.log('[AuthService] Sync service enabled after successful authentication')
+        } catch (error) {
+          console.warn('[AuthService] Failed to enable sync service:', error)
+        }
+        
+        console.log('[AuthService] setupEncryptionFromGoogleAuth completed successfully')
+        return { success: true }
+      } catch (error: any) {
+        console.error(`[AuthService] setupEncryptionFromGoogleAuth attempt ${attempts} failed:`, error)
+        
+        // DatabaseClosedError の場合は再試行
+        if (error.name === 'DatabaseClosedError' && attempts < maxRetries) {
+          console.log('[AuthService] Database closed, retrying after delay...')
+          await new Promise(resolve => setTimeout(resolve, 1000 * attempts))
+          continue
+        }
+        
+        // 最終試行または他のエラーの場合
+        if (attempts >= maxRetries) {
+          console.error('[AuthService] All setupEncryptionFromGoogleAuth attempts failed')
+          return {
+            success: false,
+            error: '暗号化キーの設定に失敗しました（最大試行回数に達しました）'
+          }
+        }
+        
+        return {
+          success: false,
+          error: `暗号化キーの設定に失敗しました: ${error.message}`
+        }
       }
-      
-      return { success: true }
-    } catch (error) {
-      console.error('Failed to setup encryption from Google auth:', error)
-      return {
-        success: false,
-        error: '暗号化キーの設定に失敗しました'
-      }
+    }
+    
+    return {
+      success: false,
+      error: '暗号化キーの設定に失敗しました'
     }
   }
   
   async logout(): Promise<void> {
-    console.log('[DEBUG] authService.logout() called - Stack trace:')
-    console.trace()
-    this.clearTimers()
-    secureStorage.clearEncryptionKey()
-    
-    const authState = await secureStorage.getAuthState()
-    console.log('[DEBUG] logout() - setting isAuthenticated to false')
-    await secureStorage.setAuthState({
-      ...authState,
-      isAuthenticated: false
-    })
+    try {
+      console.log('[AuthService] Starting logout process...')
+      
+      // 1. タイマーをクリア
+      this.clearTimers()
+      
+      // 2. 同期サービスを無効化
+      try {
+        const { syncService } = await import('./sync.service')
+        await syncService.disableSync()
+        console.log('[AuthService] Sync service disabled')
+      } catch (error) {
+        console.warn('[AuthService] Failed to disable sync service:', error)
+      }
+      
+      // 3. ローカルデータベースをクリア
+      await this.clearIndexedDB('cryptoPortfolioV2')
+      console.log('[AuthService] Local database cleared')
+      
+      // 4. 暗号化キーをクリア
+      secureStorage.clearEncryptionKey()
+      console.log('[AuthService] Encryption key cleared')
+      
+      // 5. 認証状態をクリア
+      await secureStorage.clearAuthState()
+      console.log('[AuthService] Auth state cleared')
+      
+      // 6. セッションストレージをクリア
+      try {
+        sessionStorage.clear()
+      } catch (error) {
+        console.warn('[AuthService] Failed to clear session storage:', error)
+      }
+      
+      // 7. ローカルストレージの認証関連データをクリア
+      try {
+        localStorage.removeItem('syncStatus')
+        localStorage.removeItem('globalSyncTime')
+        localStorage.removeItem('google_auth_state')
+      } catch (error) {
+        console.warn('[AuthService] Failed to clear some local storage items:', error)
+      }
+      
+      console.log('[AuthService] Logout completed successfully')
+    } catch (error) {
+      console.error('[AuthService] Logout failed:', error)
+      throw error
+    }
   }
   
   async resetAndClearData(): Promise<void> {
@@ -125,6 +215,26 @@ export class AuthService {
   async isUnlockedAndAuthenticated(): Promise<boolean> {
     const isAuth = await this.isAuthenticated()
     return isAuth && secureStorage.isUnlocked()
+  }
+
+  /**
+   * Google認証からのログアウト
+   */
+  async logoutFromGoogle(): Promise<void> {
+    try {
+      console.log('[AuthService] Starting Google logout...')
+      
+      // 1. ローカルデータのログアウト処理
+      await this.logout()
+      
+      // 2. Google認証サービスからのサインアウト
+      await googleAuthService.signOut()
+      console.log('[AuthService] Google auth sign out completed')
+      
+    } catch (error) {
+      console.error('[AuthService] Google logout failed:', error)
+      throw error
+    }
   }
   
   // Google認証情報を使用してストレージをアンロック
