@@ -125,7 +125,7 @@ export class SecureStorageService {
       const recovered = await this.tryRecoverEncryptionKey()
       if (!recovered) {
         console.error('[DEBUG] SecureStorage.addHolding - storage is locked and key recovery failed')
-        throw new Error('Storage is locked and key recovery failed')
+        throw new Error('暗号化ストレージがロックされており、キーの復元に失敗しました')
       }
       console.log('[DEBUG] SecureStorage.addHolding - key recovery successful')
     }
@@ -141,17 +141,19 @@ export class SecureStorageService {
     console.log('[DEBUG] SecureStorage.addHolding - created holding object:', newHolding)
     
     try {
+      console.log('[DEBUG] SecureStorage.addHolding - starting encryption')
       const encryptedHolding = await this.encryptHolding(newHolding)
       console.log('[DEBUG] SecureStorage.addHolding - encryption successful')
       
-      // Ensure token exists in tokens table
+      // Ensure token exists in tokens table (失敗しても継続)
       try {
         await dbServiceV2.ensureTokenExists(holding.symbol)
         console.log('[DEBUG] SecureStorage.addHolding - token existence ensured for:', holding.symbol)
       } catch (tokenError) {
-        console.warn('[DEBUG] SecureStorage.addHolding - token ensure failed (but continuing):', tokenError)
+        console.warn('[DEBUG] SecureStorage.addHolding - token ensure failed (continuing):', tokenError)
       }
       
+      console.log('[DEBUG] SecureStorage.addHolding - adding to database')
       await dbV2.table('holdings').add(encryptedHolding as any)
       console.log('[DEBUG] SecureStorage.addHolding - successfully added to database')
       
@@ -159,38 +161,53 @@ export class SecureStorageService {
       localStorage.setItem('lastDataModified', Date.now().toString())
       
       // Update metadata for sync tracking (non-blocking)
-      try {
-        const { metadataService } = await import('@/services/metadata.service')
-        const metadata = {
-          isNew: true,
-          isModified: false,
-          isDeleted: false,
-          isSynced: false, // 新規追加なので未同期
-          lastModified: new Date(now),
-          lastSyncTime: null,
-          version: 1
+      setTimeout(async () => {
+        try {
+          const { metadataService } = await import('@/services/metadata.service')
+          const metadata = {
+            isNew: true,
+            isModified: false,
+            isDeleted: false,
+            isSynced: false, // 新規追加なので未同期
+            lastModified: new Date(now),
+            lastSyncTime: null,
+            version: 1
+          }
+          await metadataService.updateCacheForItem('holding', newHolding.id, metadata)
+          console.log('[DEBUG] SecureStorage.addHolding - metadata updated for new holding:', newHolding.id)
+        } catch (error) {
+          console.warn('[DEBUG] SecureStorage.addHolding - failed to update metadata (but save succeeded):', error)
         }
-        await metadataService.updateCacheForItem('holding', newHolding.id, metadata)
-        console.log('[DEBUG] SecureStorage.addHolding - metadata updated for new holding:', newHolding.id)
-      } catch (error) {
-        console.warn('Failed to update metadata for new holding (but save succeeded):', error)
-      }
+      }, 10)
       
       // データ変更時の自動同期をトリガー（非同期）
-      try {
-        const { syncService } = await import('@/services/sync.service')
-        syncService.triggerSyncOnDataChange().catch(syncError => {
-          console.warn('Failed to trigger sync on data change:', syncError)
-        })
-      } catch (error) {
-        console.warn('Failed to setup sync trigger:', error)
-      }
+      setTimeout(async () => {
+        try {
+          const { syncService } = await import('@/services/sync.service')
+          syncService.triggerSyncOnDataChange().catch(syncError => {
+            console.warn('[DEBUG] SecureStorage.addHolding - failed to trigger sync on data change:', syncError)
+          })
+        } catch (error) {
+          console.warn('[DEBUG] SecureStorage.addHolding - failed to setup sync trigger:', error)
+        }
+      }, 50)
       
       console.log('[DEBUG] SecureStorage.addHolding - operation completed successfully:', newHolding.id)
       return newHolding.id
     } catch (encryptionError) {
       console.error('[DEBUG] SecureStorage.addHolding - encryption or save failed:', encryptionError)
-      throw encryptionError
+      
+      if (encryptionError instanceof Error) {
+        if (encryptionError.message.includes('encrypt')) {
+          throw new Error(`データの暗号化に失敗しました: ${encryptionError.message}`)
+        } else if (encryptionError.message.includes('add')) {
+          throw new Error(`データベースへの保存に失敗しました: ${encryptionError.message}`)
+        } else {
+          throw new Error(`保存処理中にエラーが発生しました: ${encryptionError.message}`)
+        }
+      } else {
+        throw new Error('保存処理中に予期しないエラーが発生しました')
+      }
     }
   }
   

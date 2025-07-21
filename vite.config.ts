@@ -35,7 +35,19 @@ VitePWA({
       '/api': {
         target: 'https://api.coingecko.com',
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, '/api/v3')
+        secure: true,
+        rewrite: (path) => path.replace(/^\/api/, '/api/v3'),
+        configure: (proxy, _options) => {
+          proxy.on('error', (err, _req, _res) => {
+            console.log('[PROXY] Error:', err)
+          })
+          proxy.on('proxyReq', (proxyReq, req, _res) => {
+            console.log('[PROXY] Request:', req.method, req.url, '-> ', proxyReq.path)
+          })
+          proxy.on('proxyRes', (proxyRes, req, _res) => {
+            console.log('[PROXY] Response:', proxyRes.statusCode, req.url)
+          })
+        }
       }
     }
   }

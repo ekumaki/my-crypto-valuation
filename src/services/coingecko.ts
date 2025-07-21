@@ -25,7 +25,7 @@ export interface CoinGeckoExchangeRate {
   }
 }
 
-const BASE_URL = import.meta.env.DEV ? '/api' : 'https://api.coingecko.com/api/v3'
+const BASE_URL = 'https://api.coingecko.com/api/v3'
 
 class CoinGeckoService {
   private requestQueue: Array<() => Promise<any>> = []
@@ -63,12 +63,26 @@ class CoinGeckoService {
     return new Promise((resolve, reject) => {
       const request = async () => {
         try {
-          const response = await fetch(`${BASE_URL}${endpoint}`)
+          const response = await fetch(`${BASE_URL}${endpoint}`, {
+            method: 'GET',
+            headers: {
+              'Accept': 'application/json',
+              'Content-Type': 'application/json',
+            },
+            mode: 'cors'
+          })
           if (!response.ok) {
             if (response.status === 429) {
               // 429エラーの場合は待機して再試行
               await new Promise(resolve => setTimeout(resolve, 1000))
-              const retryResponse = await fetch(`${BASE_URL}${endpoint}`)
+              const retryResponse = await fetch(`${BASE_URL}${endpoint}`, {
+                method: 'GET',
+                headers: {
+                  'Accept': 'application/json',
+                  'Content-Type': 'application/json',
+                },
+                mode: 'cors'
+              })
               if (!retryResponse.ok) {
                 throw new Error(`CoinGecko API error: ${retryResponse.status}`)
               }
@@ -94,10 +108,18 @@ class CoinGeckoService {
     if (!query.trim()) return []
     
     try {
+      console.log('[DEBUG] CoinGecko.searchTokens - searching for:', query)
       const data = await this.fetchAPI<CoinGeckoSearchResult>(`/search?query=${encodeURIComponent(query)}`)
+      console.log('[DEBUG] CoinGecko.searchTokens - found', data.coins.length, 'tokens')
       return data.coins.slice(0, 10) // Limit to 10 results
     } catch (error) {
-      console.error('Token search failed:', error)
+      console.error('[DEBUG] CoinGecko.searchTokens - search failed:', error)
+      
+      // ネットワークエラーの場合はより詳細なログを出力
+      if (error instanceof TypeError && error.message === 'Failed to fetch') {
+        console.error('[DEBUG] CoinGecko.searchTokens - network error, check proxy configuration')
+      }
+      
       return []
     }
   }

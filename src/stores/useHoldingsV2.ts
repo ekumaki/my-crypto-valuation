@@ -168,54 +168,66 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
       console.log('[DEBUG] addHolding - sync enabled:', syncEnabled)
       console.log('[DEBUG] addHolding - attempting to add:', holding)
       
-      // Generate a stable ID for the new holding before saving
-      const holdingId = `holding-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+      let savedId: string | number | null = null
       
-      let success = false
       if (syncEnabled) {
         // 同期が有効な場合は暗号化されたストレージを使用
-        const storageUnlocked = await ensureStorageUnlocked()
-        if (!storageUnlocked) {
-          throw new Error('ストレージのロック解除に失敗しました')
+        try {
+          const storageUnlocked = await ensureStorageUnlocked()
+          if (!storageUnlocked) {
+            throw new Error('ストレージのロック解除に失敗しました')
+          }
+          
+          savedId = await secureStorage.addHolding(holding)
+          console.log('[DEBUG] addHolding - successfully added to secure storage, ID:', savedId)
+        } catch (secureError) {
+          console.error('[DEBUG] addHolding - secure storage failed:', secureError)
+          throw new Error(`暗号化ストレージへの保存に失敗しました: ${secureError instanceof Error ? secureError.message : String(secureError)}`)
         }
-        
-        const savedId = await secureStorage.addHolding(holding)
-        success = !!savedId
-        console.log('[DEBUG] addHolding - successfully added to secure storage, ID:', savedId)
       } else {
         // 同期が無効な場合は直接DBに保存
-        console.log('[DEBUG] addHolding - adding to DB directly (sync disabled)')
-        const savedId = await dbServiceV2.addHolding(holding)
-        success = !!savedId
-        console.log('[DEBUG] addHolding - successfully added to DB, ID:', savedId)
+        try {
+          console.log('[DEBUG] addHolding - adding to DB directly (sync disabled)')
+          savedId = await dbServiceV2.addHolding(holding)
+          console.log('[DEBUG] addHolding - successfully added to DB, ID:', savedId)
+        } catch (dbError) {
+          console.error('[DEBUG] addHolding - DB save failed:', dbError)
+          throw new Error(`データベースへの保存に失敗しました: ${dbError instanceof Error ? dbError.message : String(dbError)}`)
+        }
       }
       
-      if (!success) {
-        throw new Error('データの保存に失敗しました')
+      if (!savedId) {
+        throw new Error('データの保存に失敗しました（IDが取得できませんでした）')
       }
       
       // リロード処理
-      await Promise.all([
-        loadHoldings(),
-        loadAggregatedHoldings()
-      ])
-      console.log('[DEBUG] addHolding - completed reload')
+      try {
+        await Promise.all([
+          loadHoldings(),
+          loadAggregatedHoldings()
+        ])
+        console.log('[DEBUG] addHolding - completed reload')
+      } catch (reloadError) {
+        console.warn('[DEBUG] addHolding - reload failed but save succeeded:', reloadError)
+        // リロード失敗はワーニングとして扱い、処理は継続
+      }
       
       // メタデータ処理（エラーが発生しても保存処理は成功とする）
       try {
-        await processHoldingMetadata(holdingId, syncEnabled, holding.symbol)
+        await processHoldingMetadata(savedId.toString(), syncEnabled, holding.symbol)
       } catch (metaError) {
         console.warn('[DEBUG] addHolding - metadata processing failed (but save succeeded):', metaError)
       }
       
       // 自動同期（非同期で実行、エラーでも保存処理は成功とする）
       if (syncEnabled) {
-        try {
-          const { syncService } = await import('@/services/sync.service')
-          if (syncService.isEnabled.value) {
-            console.log('[DEBUG] addHolding - triggering automatic sync')
-            // 自動同期を非同期で実行
-            syncService.performSync({ skipConflictDetection: true }).then(result => {
+        // 自動同期を非同期で実行（メイン処理をブロックしない）
+        setTimeout(async () => {
+          try {
+            const { syncService } = await import('@/services/sync.service')
+            if (syncService.isEnabled.value) {
+              console.log('[DEBUG] addHolding - triggering automatic sync')
+              const result = await syncService.performSync({ skipConflictDetection: true })
               if (result.success) {
                 console.log('[DEBUG] addHolding - automatic sync completed successfully')
               } else {
@@ -224,78 +236,87 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
                   window.showToast.warning('同期エラー', `データの自動同期に失敗しました: ${result.message}`)
                 }
               }
-            }).catch(err => {
-              console.error('[DEBUG] addHolding - automatic sync error:', err)
-              if (window.showToast) {
-                window.showToast.error('同期エラー', 'データの自動同期中にエラーが発生しました')
-              }
-            })
+            }
+          } catch (syncError) {
+            console.warn('[DEBUG] addHolding - sync failed (but save succeeded):', syncError)
           }
-        } catch (syncError) {
-          console.warn('[DEBUG] addHolding - sync setup failed (but save succeeded):', syncError)
-        }
+        }, 100)
       }
       
+      console.log('[DEBUG] addHolding - operation completed successfully')
       return true
     } catch (err) {
-      error.value = '保有データの追加に失敗しました'
-      console.error('Failed to add holding:', err)
-      console.error('Error details:', err)
+      const errorMessage = err instanceof Error ? err.message : '保有データの追加に失敗しました'
+      error.value = errorMessage
+      console.error('[DEBUG] addHolding - operation failed:', err)
       return false
     }
   }
 
   // Helper function to process metadata for holdings
   async function processHoldingMetadata(holdingId: string, syncEnabled: boolean, symbol: string) {
-    const { metadataService } = await import('@/services/metadata.service')
-    const now = new Date()
-    
-    // 保有データのメタデータを設定
-    const holdingMetadata = {
-      isNew: true,
-      isModified: false,
-      isDeleted: false,
-      isSynced: false,
-      lastModified: now,
-      lastSyncTime: null,
-      version: 1
-    }
-    
-    if (!syncEnabled) {
-      (holdingMetadata as any).syncDisabled = true
-    }
-    
-    await metadataService.updateCacheForItem('holding', holdingId, holdingMetadata)
-    console.log('[DEBUG] processHoldingMetadata - updated for ID:', holdingId)
-    
-    // トークンのメタデータ処理（簡素化）
     try {
-      const { dbV2 } = await import('@/services/db-v2')
-      const token = await dbV2.tokens.where('symbol').equals(symbol).first()
+      const { metadataService } = await import('@/services/metadata.service')
+      const now = new Date()
       
-      if (token) {
-        console.log('[DEBUG] processHoldingMetadata - processing token metadata for:', symbol)
-        
-        const tokenMetadata = {
-          isNew: false,
-          isModified: false,
-          isDeleted: false,
-          isSynced: syncEnabled ? false : true, // 同期有効時のみ未同期とする
-          lastModified: now,
-          lastSyncTime: syncEnabled ? null : now,
-          version: 1
-        }
-        
-        if (!syncEnabled) {
-          (tokenMetadata as any).syncDisabled = true
-        }
-        
-        // シンボルでメタデータを更新
-        await metadataService.updateCacheForItem('token', symbol, tokenMetadata)
-        console.log('[DEBUG] processHoldingMetadata - token metadata updated for symbol:', symbol)
+      console.log('[DEBUG] processHoldingMetadata - starting for ID:', holdingId, 'symbol:', symbol, 'syncEnabled:', syncEnabled)
+      
+      // 保有データのメタデータを設定
+      const holdingMetadata = {
+        isNew: true,
+        isModified: false,
+        isDeleted: false,
+        isSynced: !syncEnabled, // 同期無効時は既に同期済みとして扱う
+        lastModified: now,
+        lastSyncTime: syncEnabled ? null : now,
+        version: 1
       }
-    } catch (tokenError) {
-      console.warn('[DEBUG] processHoldingMetadata - token metadata processing failed:', tokenError)
+      
+      try {
+        await metadataService.updateCacheForItem('holding', holdingId, holdingMetadata)
+        console.log('[DEBUG] processHoldingMetadata - holding metadata updated for ID:', holdingId)
+      } catch (holdingMetaError) {
+        console.warn('[DEBUG] processHoldingMetadata - holding metadata update failed:', holdingMetaError)
+      }
+      
+      // トークンのメタデータ処理（失敗しても継続）
+      try {
+        const { dbV2 } = await import('@/services/db-v2')
+        const token = await dbV2.tokens.where('symbol').equals(symbol).first()
+        
+        if (token) {
+          console.log('[DEBUG] processHoldingMetadata - found token for symbol:', symbol)
+          
+          const tokenMetadata = {
+            isNew: false,
+            isModified: false,
+            isDeleted: false,
+            isSynced: !syncEnabled, // 同期無効時は既に同期済みとして扱う
+            lastModified: now,
+            lastSyncTime: syncEnabled ? null : now,
+            version: 1
+          }
+          
+          // シンボルでメタデータを更新
+          await metadataService.updateCacheForItem('token', symbol, tokenMetadata)
+          console.log('[DEBUG] processHoldingMetadata - token metadata updated for symbol:', symbol)
+          
+          // IDでもメタデータを更新（念のため）
+          if (token.id) {
+            await metadataService.updateCacheForItem('token', token.id, tokenMetadata)
+            console.log('[DEBUG] processHoldingMetadata - token metadata updated for ID:', token.id)
+          }
+        } else {
+          console.log('[DEBUG] processHoldingMetadata - token not found for symbol:', symbol)
+        }
+      } catch (tokenError) {
+        console.warn('[DEBUG] processHoldingMetadata - token metadata processing failed (continuing):', tokenError)
+      }
+      
+      console.log('[DEBUG] processHoldingMetadata - completed successfully')
+    } catch (error) {
+      console.error('[DEBUG] processHoldingMetadata - failed:', error)
+      throw error
     }
   }
 
