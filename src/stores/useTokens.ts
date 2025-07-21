@@ -39,6 +39,15 @@ export const useTokensStore = defineStore('tokens', () => {
   async function addToken(tokenData: { id: string; symbol: string; name: string; iconUrl?: string }) {
     try {
       error.value = null
+      console.log('[DEBUG] addToken - attempting to add token:', tokenData)
+      
+      // Check if token already exists
+      const existingToken = await dbV2.tokens.where('symbol').equals(tokenData.symbol.toUpperCase()).first()
+      if (existingToken) {
+        console.log('[DEBUG] addToken - token already exists:', existingToken)
+        return true
+      }
+      
       const token: Token = {
         symbol: tokenData.symbol.toUpperCase(),
         name: tokenData.name,
@@ -46,17 +55,23 @@ export const useTokensStore = defineStore('tokens', () => {
         iconUrl: tokenData.iconUrl
       }
 
+      console.log('[DEBUG] addToken - adding token to database:', token)
       await dbServiceV2.addToken(token)
+      
+      console.log('[DEBUG] addToken - reloading tokens')
       await loadTokens()
       
-      // データ変更時の自動同期をトリガー
+      // データ変更時の自動同期をトリガー（非同期で実行）
       try {
         const { syncService } = await import('@/services/sync.service')
-        await syncService.triggerSyncOnDataChange()
+        syncService.triggerSyncOnDataChange().catch(syncError => {
+          console.warn('Failed to trigger sync on token add:', syncError)
+        })
       } catch (error) {
-        console.warn('Failed to trigger sync on token add:', error)
+        console.warn('Failed to setup sync trigger on token add:', error)
       }
       
+      console.log('[DEBUG] addToken - token added successfully')
       return true
     } catch (err) {
       error.value = 'トークンの追加に失敗しました'

@@ -117,12 +117,17 @@ export class SecureStorageService {
   }
   
   async addHolding(holding: Omit<Holding, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> {
+    console.log('[DEBUG] SecureStorage.addHolding - starting with:', holding)
+    
     if (!this.isUnlocked()) {
+      console.log('[DEBUG] SecureStorage.addHolding - storage is locked, attempting recovery')
       // 暗号化キーの自動復元を試行
       const recovered = await this.tryRecoverEncryptionKey()
       if (!recovered) {
+        console.error('[DEBUG] SecureStorage.addHolding - storage is locked and key recovery failed')
         throw new Error('Storage is locked and key recovery failed')
       }
+      console.log('[DEBUG] SecureStorage.addHolding - key recovery successful')
     }
     
     const now = Date.now()
@@ -133,43 +138,60 @@ export class SecureStorageService {
       updatedAt: now
     }
     
-    const encryptedHolding = await this.encryptHolding(newHolding)
+    console.log('[DEBUG] SecureStorage.addHolding - created holding object:', newHolding)
     
-    // Ensure token exists in tokens table
-    await dbServiceV2.ensureTokenExists(holding.symbol)
-    
-    await dbV2.table('holdings').add(encryptedHolding as any)
-    
-    // Update last data modified timestamp for sync
-    localStorage.setItem('lastDataModified', Date.now().toString())
-    
-    // Update metadata for sync tracking
     try {
-      const { metadataService } = await import('@/services/metadata.service')
-      const metadata = {
-        isNew: true,
-        isModified: false,
-        isDeleted: false,
-        isSynced: false, // 新規追加なので未同期
-        lastModified: new Date(now),
-        lastSyncTime: null,
-        version: 1
+      const encryptedHolding = await this.encryptHolding(newHolding)
+      console.log('[DEBUG] SecureStorage.addHolding - encryption successful')
+      
+      // Ensure token exists in tokens table
+      try {
+        await dbServiceV2.ensureTokenExists(holding.symbol)
+        console.log('[DEBUG] SecureStorage.addHolding - token existence ensured for:', holding.symbol)
+      } catch (tokenError) {
+        console.warn('[DEBUG] SecureStorage.addHolding - token ensure failed (but continuing):', tokenError)
       }
-      metadataService.updateCacheForItem('holding', newHolding.id, metadata)
-      console.log('[DEBUG] addHolding - metadata updated for new holding:', newHolding.id)
-    } catch (error) {
-      console.warn('Failed to update metadata for new holding:', error)
+      
+      await dbV2.table('holdings').add(encryptedHolding as any)
+      console.log('[DEBUG] SecureStorage.addHolding - successfully added to database')
+      
+      // Update last data modified timestamp for sync
+      localStorage.setItem('lastDataModified', Date.now().toString())
+      
+      // Update metadata for sync tracking (non-blocking)
+      try {
+        const { metadataService } = await import('@/services/metadata.service')
+        const metadata = {
+          isNew: true,
+          isModified: false,
+          isDeleted: false,
+          isSynced: false, // 新規追加なので未同期
+          lastModified: new Date(now),
+          lastSyncTime: null,
+          version: 1
+        }
+        await metadataService.updateCacheForItem('holding', newHolding.id, metadata)
+        console.log('[DEBUG] SecureStorage.addHolding - metadata updated for new holding:', newHolding.id)
+      } catch (error) {
+        console.warn('Failed to update metadata for new holding (but save succeeded):', error)
+      }
+      
+      // データ変更時の自動同期をトリガー（非同期）
+      try {
+        const { syncService } = await import('@/services/sync.service')
+        syncService.triggerSyncOnDataChange().catch(syncError => {
+          console.warn('Failed to trigger sync on data change:', syncError)
+        })
+      } catch (error) {
+        console.warn('Failed to setup sync trigger:', error)
+      }
+      
+      console.log('[DEBUG] SecureStorage.addHolding - operation completed successfully:', newHolding.id)
+      return newHolding.id
+    } catch (encryptionError) {
+      console.error('[DEBUG] SecureStorage.addHolding - encryption or save failed:', encryptionError)
+      throw encryptionError
     }
-    
-    // データ変更時の自動同期をトリガー
-    try {
-      const { syncService } = await import('@/services/sync.service')
-      await syncService.triggerSyncOnDataChange()
-    } catch (error) {
-      console.warn('Failed to trigger sync on data change:', error)
-    }
-    
-    return newHolding.id
   }
   
   async updateHolding(id: string, updates: Partial<Omit<Holding, 'id' | 'createdAt'>>): Promise<number> {
