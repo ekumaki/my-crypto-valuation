@@ -19,6 +19,14 @@ export const useTokensStore = defineStore('tokens', () => {
       isLoading.value = true
       error.value = null
       tokens.value = await dbV2.tokens.toArray()
+      console.log('[DEBUG] loadTokens - loaded tokens:', tokens.value.length, 'tokens')
+      
+      // Log custom tokens (non-preset)
+      const presetSymbols = ['BTC', 'ETH', 'BNB', 'ADA', 'SOL', 'XRP', 'DOT', 'DOGE', 'AVAX', 'SHIB', 'MATIC', 'LTC', 'ATOM', 'LINK', 'UNI']
+      const customTokens = tokens.value.filter(t => !presetSymbols.includes(t.symbol))
+      if (customTokens.length > 0) {
+        console.log('[DEBUG] loadTokens - custom tokens found:', customTokens)
+      }
       
       // アイコンが不足しているトークンがある場合は修復を実行
       const tokensWithoutIcons = tokens.value.filter(token => !token.iconUrl)
@@ -52,7 +60,8 @@ export const useTokensStore = defineStore('tokens', () => {
         symbol: tokenData.symbol.toUpperCase(),
         name: tokenData.name,
         id: tokenData.id,
-        iconUrl: tokenData.iconUrl
+        iconUrl: tokenData.iconUrl,
+        isCustom: true  // User-added tokens are always custom
       }
 
       console.log('[DEBUG] addToken - adding token to database:', token)

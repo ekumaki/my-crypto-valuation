@@ -255,7 +255,7 @@ class SyncService {
       // 初期データを確実に同期済みとしてマーク
       try {
         const { metadataService } = await import('@/services/metadata.service')
-        await metadataService.forceResetAllMetadata()
+        await metadataService.ensurePresetDataExists()
         console.log('[DEBUG] enableSync - initial data marked as synced')
       } catch (error) {
         console.warn('[DEBUG] enableSync - failed to mark initial data as synced:', error)
@@ -317,7 +317,7 @@ class SyncService {
       // 初期データを確実に同期済みとしてマーク
       try {
         const { metadataService } = await import('@/services/metadata.service')
-        await metadataService.forceResetAllMetadata()
+        await metadataService.ensurePresetDataExists()
         console.log('[DEBUG] enableSyncForNewUser - initial data marked as synced')
       } catch (error) {
         console.warn('[DEBUG] enableSyncForNewUser - failed to mark initial data as synced:', error)

@@ -145,13 +145,15 @@ export class SecureStorageService {
       const encryptedHolding = await this.encryptHolding(newHolding)
       console.log('[DEBUG] SecureStorage.addHolding - encryption successful')
       
-      // Ensure token exists in tokens table (失敗しても継続)
-      try {
-        await dbServiceV2.ensureTokenExists(holding.symbol)
-        console.log('[DEBUG] SecureStorage.addHolding - token existence ensured for:', holding.symbol)
-      } catch (tokenError) {
-        console.warn('[DEBUG] SecureStorage.addHolding - token ensure failed (continuing):', tokenError)
-      }
+      // Token should already exist from AddHoldingModal
+      // ensureTokenExists is only a fallback and shouldn't overwrite existing token info
+      // Commenting out to prevent overwriting token information
+      // try {
+      //   await dbServiceV2.ensureTokenExists(holding.symbol)
+      //   console.log('[DEBUG] SecureStorage.addHolding - token existence ensured for:', holding.symbol)
+      // } catch (tokenError) {
+      //   console.warn('[DEBUG] SecureStorage.addHolding - token ensure failed (continuing):', tokenError)
+      // }
       
       console.log('[DEBUG] SecureStorage.addHolding - adding to database')
       await dbV2.table('holdings').add(encryptedHolding as any)
@@ -469,7 +471,14 @@ export class SecureStorageService {
   }
 
   async ensureInitialDataExists(): Promise<void> {
-    // This is now handled by metadataService.forceResetAllMetadata
+    console.log('[DEBUG] ensureInitialDataExists - ensuring preset data exists safely')
+    try {
+      const { metadataService } = await import('@/services/metadata.service')
+      await metadataService.ensurePresetDataExists()
+      console.log('[DEBUG] ensureInitialDataExists - completed successfully')
+    } catch (error) {
+      console.error('[DEBUG] ensureInitialDataExists - failed:', error)
+    }
   }
   
   async getAuthState(): Promise<AuthState> {

@@ -71,7 +71,7 @@ export class AuthService {
         // 初期データを確実に同期済みとしてマーク
         try {
           const { metadataService } = await import('./metadata.service')
-          await metadataService.forceResetAllMetadata()
+          await metadataService.ensurePresetDataExists()
           console.log('[AuthService] Initial data marked as synced')
         } catch (error) {
           console.warn('[AuthService] Failed to mark initial data as synced:', error)
@@ -277,7 +277,7 @@ export class AuthService {
       // 初期データを確実に同期済みとしてマーク
       try {
         const { metadataService } = await import('./metadata.service')
-        await metadataService.forceResetAllMetadata()
+        await metadataService.ensurePresetDataExists()
         console.log('[DEBUG] unlockWithGoogleAuth - initial data marked as synced')
       } catch (error) {
         console.warn('[DEBUG] unlockWithGoogleAuth - failed to mark initial data as synced:', error)
