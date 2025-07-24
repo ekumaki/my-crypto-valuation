@@ -125,18 +125,27 @@ class SyncService {
   private emitSyncComplete() {
     // メタデータ更新とキャッシュ再構築の完了を確実にするために待機
     setTimeout(async () => {
-      console.log('[DEBUG] emitSyncComplete - firing sync complete event')
-      this.eventEmitter.emit('syncComplete')
+      console.log('[DEBUG] emitSyncComplete - waiting for metadata update completion')
       
-      // 最終的な未同期件数をログ出力
+      // メタデータキャッシュを明示的にクリア
       try {
         const { metadataService } = await import('@/services/metadata.service')
+        metadataService.clearMetadataCache()
+        console.log('[DEBUG] emitSyncComplete - metadata cache cleared')
+        
+        // さらに待機してデータベース書き込みの完了を確実にする
+        await new Promise(resolve => setTimeout(resolve, 200))
+        
+        // 最終的な未同期件数を確認
         const finalCount = await metadataService.getUnsyncedDataCount(true)
-        console.log('[DEBUG] emitSyncComplete - final unsynced count after event:', finalCount)
+        console.log('[DEBUG] emitSyncComplete - final unsynced count after cache clear:', finalCount)
       } catch (error) {
-        console.error('[DEBUG] emitSyncComplete - failed to get final count:', error)
+        console.error('[DEBUG] emitSyncComplete - failed to clear cache or get final count:', error)
       }
-    }, 300)
+      
+      console.log('[DEBUG] emitSyncComplete - firing sync complete event')
+      this.eventEmitter.emit('syncComplete')
+    }, 500)  // 300msから500msに延長
   }
 
   private emitConflictResolved() {
@@ -246,7 +255,7 @@ class SyncService {
       // 初期データを確実に同期済みとしてマーク
       try {
         const { metadataService } = await import('@/services/metadata.service')
-        await metadataService.forceResetAllMetadata()
+        await metadataService.ensurePresetDataExists()
         console.log('[DEBUG] enableSync - initial data marked as synced')
       } catch (error) {
         console.warn('[DEBUG] enableSync - failed to mark initial data as synced:', error)
@@ -308,7 +317,7 @@ class SyncService {
       // 初期データを確実に同期済みとしてマーク
       try {
         const { metadataService } = await import('@/services/metadata.service')
-        await metadataService.forceResetAllMetadata()
+        await metadataService.ensurePresetDataExists()
         console.log('[DEBUG] enableSyncForNewUser - initial data marked as synced')
       } catch (error) {
         console.warn('[DEBUG] enableSyncForNewUser - failed to mark initial data as synced:', error)
@@ -504,6 +513,13 @@ class SyncService {
         const { metadataService } = await import('@/services/metadata.service')
         await metadataService.markAllAsSynced()
         console.log('[DEBUG] performSync - all data marked as synced')
+        
+        // メタデータ更新が完全に完了するまで少し待機
+        await new Promise(resolve => setTimeout(resolve, 100))
+        
+        // キャッシュを再度クリアして確実に最新状態を反映
+        metadataService.clearMetadataCache()
+        console.log('[DEBUG] performSync - cache cleared after marking all as synced')
       } catch (error) {
         console.warn('[DEBUG] performSync - failed to mark data as synced:', error)
       }

@@ -101,64 +101,32 @@ class MetadataService {
    * Check if an individual item is unsynced
    */
   isUnsyncedData(metadata: SyncMetadata, syncEnabled: boolean = true): boolean {
-    const debugInfo = {
-      isDeleted: metadata.isDeleted,
-      isNew: metadata.isNew,
-      isModified: metadata.isModified,
-      isSynced: metadata.isSynced,
-      hasLastSyncTime: !!metadata.lastSyncTime,
-      syncDisabled: metadata.syncDisabled,
-      syncEnabled
-    }
-    
-    // 削除済みで未同期の場合
-    if (metadata.isDeleted && !metadata.isSynced) {
-      console.log('[DEBUG] isUnsyncedData - deleted and unsynced:', debugInfo)
-      return true
-    }
-    
-    // 新規作成で未同期の場合
-    if (metadata.isNew && !metadata.isSynced) {
-      console.log('[DEBUG] isUnsyncedData - new and unsynced:', debugInfo)
-      return true
-    }
-    
-    // 変更済みで未同期の場合
-    if (metadata.isModified && !metadata.isSynced) {
-      console.log('[DEBUG] isUnsyncedData - modified and unsynced:', debugInfo)
-      return true
-    }
-    
-    // 既に同期済みとマークされている場合は同期済み
+    // 同期済みフラグが立っていて、同期時刻がある場合は同期済み
     if (metadata.isSynced && metadata.lastSyncTime) {
-      console.log('[DEBUG] isUnsyncedData - synced with timestamp:', debugInfo)
       return false
     }
     
-    // 同期無効時に作成されたデータの特別処理
-    if (metadata.syncDisabled) {
-      const result = syncEnabled ? !metadata.isSynced : true
-      console.log('[DEBUG] isUnsyncedData - syncDisabled data:', { ...debugInfo, result })
-      return result
-    }
-    
-    // 最後の同期時刻がない場合は未同期（ただし、globalSyncTimeより前に作成されたものは同期済みとみなす）
-    if (!metadata.lastSyncTime) {
-      if (this.globalSyncTime && metadata.lastModified <= this.globalSyncTime) {
-        console.log('[DEBUG] isUnsyncedData - no sync time but before global sync:', debugInfo)
-        return false // 既存データとして扱う
-      }
-      console.log('[DEBUG] isUnsyncedData - no sync time and after global sync:', debugInfo)
-      return true // 新しいデータで未同期
-    }
-    
-    // グローバル同期時刻より後に変更された場合は未同期
-    if (this.globalSyncTime && metadata.lastModified > this.globalSyncTime) {
-      console.log('[DEBUG] isUnsyncedData - modified after global sync:', debugInfo)
+    // 削除・新規・変更のいずれかのフラグが立っている場合は未同期
+    if (metadata.isDeleted || metadata.isNew || metadata.isModified) {
       return true
     }
     
-    console.log('[DEBUG] isUnsyncedData - default synced:', debugInfo)
+    // isSyncedフラグが明示的にfalseの場合は未同期
+    if (metadata.isSynced === false) {
+      return true
+    }
+    
+    // 同期時刻がない場合
+    if (!metadata.lastSyncTime) {
+      // グローバル同期時刻より前のデータは同期済みとみなす
+      if (this.globalSyncTime && metadata.lastModified <= this.globalSyncTime) {
+        return false
+      }
+      // それ以外は未同期
+      return true
+    }
+    
+    // デフォルトは同期済み
     return false
   }
 
@@ -256,7 +224,6 @@ class MetadataService {
     for (const holding of holdings) {
       const metadata = this.getOrCreateMetadata(holding, 'holding')
       if (this.isUnsyncedData(metadata, syncEnabled)) {
-        console.log('[DEBUG] getUnsyncedDataCount - unsynced holding found:', holding.symbol)
         holdingCount++
       }
     }
@@ -264,11 +231,7 @@ class MetadataService {
     // Count unsynced locations
     for (const location of locations) {
       const metadata = this.getOrCreateMetadata(location, 'location')
-      const isPreset = this.isPresetData(location, 'location')
-      const isUnsynced = this.isUnsyncedData(metadata, syncEnabled)
-      console.log('[DEBUG] getUnsyncedDataCount - location:', location.name, 'isPreset:', isPreset, 'isUnsynced:', isUnsynced, 'metadata:', metadata)
-      if (isUnsynced) {
-        console.log('[DEBUG] getUnsyncedDataCount - unsynced location found:', location.name)
+      if (this.isUnsyncedData(metadata, syncEnabled)) {
         locationCount++
       }
     }
@@ -276,11 +239,7 @@ class MetadataService {
     // Count unsynced tokens
     for (const token of tokens) {
       const metadata = this.getOrCreateMetadata(token, 'token')
-      const isPreset = this.isPresetData(token, 'token')
-      const isUnsynced = this.isUnsyncedData(metadata, syncEnabled)
-      console.log('[DEBUG] getUnsyncedDataCount - token:', token.symbol, 'isPreset:', isPreset, 'isUnsynced:', isUnsynced, 'metadata:', metadata)
-      if (isUnsynced) {
-        console.log('[DEBUG] getUnsyncedDataCount - unsynced token found:', token.symbol)
+      if (this.isUnsyncedData(metadata, syncEnabled)) {
         tokenCount++
       }
     }
@@ -498,10 +457,17 @@ class MetadataService {
     console.log('[DEBUG] markAllAsSynced - starting to mark all data as synced')
     
     try {
+      // キャッシュを事前にクリアして最新データを確実に取得
+      this.clearCache()
+      
       const holdings = await dbV2.holdings.toArray()
       const locations = await dbV2.locations.toArray()
       const tokens = await dbV2.tokens.toArray()
       const now = new Date()
+
+      // 保有している仮想通貨のシンボルを収集
+      const holdingSymbols = new Set(holdings.map(h => h.symbol))
+      console.log('[DEBUG] markAllAsSynced - holding symbols:', Array.from(holdingSymbols))
 
       // Mark holdings as synced
       for (const holding of holdings) {
@@ -537,41 +503,35 @@ class MetadataService {
         // syncDisabledフラグを完全に削除
         delete (syncedMetadata as any).syncDisabled
         await this.updateCacheForItem('token', token.id || token.symbol, syncedMetadata)
+        
+        // 保有している仮想通貨のトークンは特別に処理
+        if (holdingSymbols.has(token.symbol)) {
+          console.log('[DEBUG] markAllAsSynced - marking used token as synced:', token.symbol)
+          // シンボルとIDの両方でキャッシュを更新
+          await this.updateCacheForItem('token', token.symbol, syncedMetadata)
+          if (token.id) {
+            await this.updateCacheForItem('token', token.id, syncedMetadata)
+          }
+        }
       }
 
-      // 新しく追加されたトークンメタデータも同期済みとしてマーク
-      // キャッシュ内の未同期トークンメタデータをチェック
-      const holdingSymbols = new Set(holdings.map(h => h.symbol))
-      console.log('[DEBUG] markAllAsSynced - checking cached tokens for holdings symbols:', Array.from(holdingSymbols))
-      console.log('[DEBUG] markAllAsSynced - current cache keys:', Array.from(this.metadataCache.keys()).filter(k => k.startsWith('token_')))
-      
-      for (const [cacheKey, metadata] of this.metadataCache.entries()) {
-        if (cacheKey.startsWith('token_')) {
-          const tokenIdentifier = cacheKey.replace('token_', '')
-          console.log('[DEBUG] markAllAsSynced - found cached token:', tokenIdentifier, 'isSynced:', metadata.isSynced)
-          
-          if (!metadata.isSynced) {
-            console.log('[DEBUG] markAllAsSynced - checking cached token:', tokenIdentifier, 'metadata:', metadata)
-            
-            // シンボルベースでチェック（BTC, ETHなど）
-            const isUsedSymbol = holdingSymbols.has(tokenIdentifier)
-            // IDベースでチェック（bitcoin, ethereumなど）
-            const matchingToken = tokens.find(t => t.id === tokenIdentifier)
-            const isUsedId = matchingToken && holdingSymbols.has(matchingToken.symbol)
-            
-            console.log('[DEBUG] markAllAsSynced - token check:', tokenIdentifier, 'isUsedSymbol:', isUsedSymbol, 'isUsedId:', isUsedId)
-            
-            if (isUsedSymbol || isUsedId) {
-              console.log('[DEBUG] markAllAsSynced - marking cached token as synced:', tokenIdentifier)
-              const syncedMetadata = {
-                ...this.markAsSynced(metadata),
-                lastSyncTime: now
-              }
-              delete (syncedMetadata as any).syncDisabled
-              await this.updateCacheForItem('token', tokenIdentifier, syncedMetadata)
-            } else {
-              console.log('[DEBUG] markAllAsSynced - token not in holdings, skipping:', tokenIdentifier)
-            }
+      // 保有トークンに関連するすべてのメタデータを強制的に同期済みに
+      for (const symbol of holdingSymbols) {
+        const token = tokens.find(t => t.symbol === symbol)
+        if (token) {
+          console.log('[DEBUG] markAllAsSynced - ensuring token is synced:', symbol)
+          const syncedMetadata = {
+            isNew: false,
+            isModified: false,
+            isDeleted: false,
+            isSynced: true,
+            lastModified: now,
+            lastSyncTime: now,
+            version: 1
+          }
+          await this.updateCacheForItem('token', symbol, syncedMetadata)
+          if (token.id) {
+            await this.updateCacheForItem('token', token.id, syncedMetadata)
           }
         }
       }
@@ -579,13 +539,16 @@ class MetadataService {
       // グローバル同期時刻を設定
       this.setGlobalSyncTime(now)
       
-      // キャッシュをクリアするが、すぐに新しい同期済み状態でキャッシュを再構築
+      // キャッシュを完全にクリアして、次回の未同期件数計算時に新しいデータを使用する
       this.clearCache()
       
-      // 同期完了後、少し待ってからキャッシュを再構築
-      await new Promise(resolve => setTimeout(resolve, 50))
+      // データベースへの書き込みが完了するまで待機
+      await new Promise(resolve => setTimeout(resolve, 100))
       
-      console.log('[DEBUG] markAllAsSynced - completed successfully, cache will be rebuilt with synced state')
+      // 再度キャッシュをクリアして確実に最新状態を反映
+      this.clearCache()
+      
+      console.log('[DEBUG] markAllAsSynced - completed successfully, all cache cleared')
     } catch (error) {
       console.error('[DEBUG] markAllAsSynced - error:', error)
       throw error
@@ -593,7 +556,115 @@ class MetadataService {
   }
 
   /**
+   * Ensure preset data exists without clearing custom data
+   * This is safe to call multiple times
+   */
+  async ensurePresetDataExists(): Promise<void> {
+    console.log('[DEBUG] ensurePresetDataExists - ensuring preset data exists')
+
+    // Clear only metadata cache, not the actual data
+    this.clearCache()
+
+    // Create metadata that marks items as pre-existing and synced
+    const createInitialMetadata = () => {
+      const now = new Date()
+      return {
+        isNew: false,
+        isModified: false,
+        isDeleted: false,
+        isSynced: true,
+        lastModified: now,
+        lastSyncTime: now,
+        version: 1
+      }
+    }
+
+    // Populate with preset locations
+    const presetLocations = [
+        { id: 'bitflyer', name: 'bitFlyer', type: 'domestic_cex' as const, isCustom: false },
+        { id: 'coincheck', name: 'Coincheck', type: 'domestic_cex' as const, isCustom: false },
+        { id: 'bitbank', name: 'bitbank', type: 'domestic_cex' as const, isCustom: false },
+        { id: 'gmo-coin', name: 'GMO Coin', type: 'domestic_cex' as const, isCustom: false },
+        { id: 'sbi-vc', name: 'SBI VC Trade', type: 'domestic_cex' as const, isCustom: false },
+        { id: 'binance', name: 'Binance', type: 'global_cex' as const, isCustom: false },
+        { id: 'coinbase', name: 'Coinbase', type: 'global_cex' as const, isCustom: false },
+        { id: 'kraken', name: 'Kraken', type: 'global_cex' as const, isCustom: false },
+        { id: 'bybit', name: 'Bybit', type: 'global_cex' as const, isCustom: false },
+        { id: 'okx', name: 'OKX', type: 'global_cex' as const, isCustom: false },
+        { id: 'metamask', name: 'MetaMask', type: 'sw_wallet' as const, isCustom: false },
+        { id: 'trust-wallet', name: 'Trust Wallet', type: 'sw_wallet' as const, isCustom: false },
+        { id: 'phantom', name: 'Phantom', type: 'sw_wallet' as const, isCustom: false },
+        { id: 'keplr', name: 'Keplr', type: 'sw_wallet' as const, isCustom: false },
+        { id: 'backpack', name: 'Backpack', type: 'sw_wallet' as const, isCustom: false },
+        { id: 'ledger', name: 'Ledger', type: 'hw_wallet' as const, isCustom: false },
+        { id: 'trezor', name: 'Trezor', type: 'hw_wallet' as const, isCustom: false }
+    ]
+
+    // Populate with preset tokens
+    const presetTokens = [
+        { symbol: 'BTC', name: 'Bitcoin', id: 'bitcoin', isCustom: false },
+        { symbol: 'ETH', name: 'Ethereum', id: 'ethereum', isCustom: false },
+        { symbol: 'BNB', name: 'BNB', id: 'binancecoin', isCustom: false },
+        { symbol: 'ADA', name: 'Cardano', id: 'cardano', isCustom: false },
+        { symbol: 'SOL', name: 'Solana', id: 'solana', isCustom: false },
+        { symbol: 'XRP', name: 'XRP', id: 'ripple', isCustom: false },
+        { symbol: 'DOT', name: 'Polkadot', id: 'polkadot', isCustom: false },
+        { symbol: 'DOGE', name: 'Dogecoin', id: 'dogecoin', isCustom: false },
+        { symbol: 'AVAX', name: 'Avalanche', id: 'avalanche-2', isCustom: false },
+        { symbol: 'SHIB', name: 'Shiba Inu', id: 'shiba-inu', isCustom: false },
+        { symbol: 'MATIC', name: 'Polygon', id: 'matic-network', isCustom: false },
+        { symbol: 'LTC', name: 'Litecoin', id: 'litecoin', isCustom: false },
+        { symbol: 'ATOM', name: 'Cosmos', id: 'cosmos', isCustom: false },
+        { symbol: 'LINK', name: 'Chainlink', id: 'chainlink', isCustom: false },
+        { symbol: 'UNI', name: 'Uniswap', id: 'uniswap', isCustom: false }
+    ]
+
+    // Add preset locations if they don't exist
+    for (const location of presetLocations) {
+      const existing = await dbV2.locations.get(location.id)
+      if (!existing) {
+        await dbV2.locations.add(location)
+        await this.updateCacheForItem('location', location.id, createInitialMetadata())
+      }
+    }
+
+    // Add preset tokens if they don't exist
+    for (const token of presetTokens) {
+      const existing = await dbV2.tokens.get(token.symbol)
+      if (!existing) {
+        await dbV2.tokens.add(token)
+        await this.updateCacheForItem('token', token.symbol, createInitialMetadata())
+      }
+    }
+
+    console.log('[DEBUG] ensurePresetDataExists - completed successfully')
+  }
+
+  /**
+   * Clean up legacy metadata without affecting user data
+   */
+  async cleanupLegacyMetadata(): Promise<void> {
+    console.log('[DEBUG] cleanupLegacyMetadata - cleaning up legacy metadata only')
+
+    // Clear all cached metadata
+    this.clearCache()
+
+    // Clear only problematic localStorage keys
+    const keysToRemove: string[] = []
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i)
+      if (key && (key.startsWith('unsynced_') || key.startsWith('metadata_') || key.includes('conflictData') || key.includes('unsyncedCount') || key === 'legacyDataResetCompleted')) {
+        keysToRemove.push(key)
+      }
+    }
+    keysToRemove.forEach(key => localStorage.removeItem(key))
+
+    console.log('[DEBUG] cleanupLegacyMetadata - removed', keysToRemove.length, 'legacy keys')
+  }
+
+  /**
    * Force reset all metadata - useful for clearing legacy unsynced data
+   * WARNING: This will delete all custom tokens and locations!
    */
   async forceResetAllMetadata(): Promise<void> {
     console.log('[DEBUG] forceResetAllMetadata - clearing all metadata and repopulating initial data')
@@ -611,6 +682,10 @@ class MetadataService {
     }
     keysToRemove.forEach(key => localStorage.removeItem(key))
 
+    // Preserve custom tokens before clearing
+    const customTokens = await this.getCustomTokens()
+    console.log(`[DEBUG] forceResetAllMetadata - preserving ${customTokens.length} custom tokens:`, customTokens.map(t => t.symbol))
+    
     // Clear existing tables
     await dbV2.locations.clear()
     await dbV2.tokens.clear()
@@ -652,21 +727,21 @@ class MetadataService {
 
     // Populate with preset tokens
     const presetTokens = [
-        { symbol: 'BTC', name: 'Bitcoin', id: 'bitcoin' },
-        { symbol: 'ETH', name: 'Ethereum', id: 'ethereum' },
-        { symbol: 'BNB', name: 'BNB', id: 'binancecoin' },
-        { symbol: 'ADA', name: 'Cardano', id: 'cardano' },
-        { symbol: 'SOL', name: 'Solana', id: 'solana' },
-        { symbol: 'XRP', name: 'XRP', id: 'ripple' },
-        { symbol: 'DOT', name: 'Polkadot', id: 'polkadot' },
-        { symbol: 'DOGE', name: 'Dogecoin', id: 'dogecoin' },
-        { symbol: 'AVAX', name: 'Avalanche', id: 'avalanche-2' },
-        { symbol: 'SHIB', name: 'Shiba Inu', id: 'shiba-inu' },
-        { symbol: 'MATIC', name: 'Polygon', id: 'matic-network' },
-        { symbol: 'LTC', name: 'Litecoin', id: 'litecoin' },
-        { symbol: 'ATOM', name: 'Cosmos', id: 'cosmos' },
-        { symbol: 'LINK', name: 'Chainlink', id: 'chainlink' },
-        { symbol: 'UNI', name: 'Uniswap', id: 'uniswap' }
+        { symbol: 'BTC', name: 'Bitcoin', id: 'bitcoin', isCustom: false },
+        { symbol: 'ETH', name: 'Ethereum', id: 'ethereum', isCustom: false },
+        { symbol: 'BNB', name: 'BNB', id: 'binancecoin', isCustom: false },
+        { symbol: 'ADA', name: 'Cardano', id: 'cardano', isCustom: false },
+        { symbol: 'SOL', name: 'Solana', id: 'solana', isCustom: false },
+        { symbol: 'XRP', name: 'XRP', id: 'ripple', isCustom: false },
+        { symbol: 'DOT', name: 'Polkadot', id: 'polkadot', isCustom: false },
+        { symbol: 'DOGE', name: 'Dogecoin', id: 'dogecoin', isCustom: false },
+        { symbol: 'AVAX', name: 'Avalanche', id: 'avalanche-2', isCustom: false },
+        { symbol: 'SHIB', name: 'Shiba Inu', id: 'shiba-inu', isCustom: false },
+        { symbol: 'MATIC', name: 'Polygon', id: 'matic-network', isCustom: false },
+        { symbol: 'LTC', name: 'Litecoin', id: 'litecoin', isCustom: false },
+        { symbol: 'ATOM', name: 'Cosmos', id: 'cosmos', isCustom: false },
+        { symbol: 'LINK', name: 'Chainlink', id: 'chainlink', isCustom: false },
+        { symbol: 'UNI', name: 'Uniswap', id: 'uniswap', isCustom: false }
     ]
 
     // Add locations and then update with metadata
@@ -681,10 +756,186 @@ class MetadataService {
       await this.updateCacheForItem('token', token.symbol, createInitialMetadata())
     }
 
+    // Restore custom tokens that were preserved
+    if (customTokens.length > 0) {
+      console.log(`[DEBUG] forceResetAllMetadata - restoring ${customTokens.length} custom tokens`)
+      // Ensure custom tokens are marked as custom
+      const customTokensWithFlag = customTokens.map(token => ({
+        ...token,
+        isCustom: true
+      }))
+      await dbV2.tokens.bulkAdd(customTokensWithFlag)
+      
+      // Create metadata for custom tokens - mark them as existing but not synced
+      const createCustomTokenMetadata = () => {
+        const now = new Date()
+        return {
+          isNew: false,
+          isModified: false,
+          isDeleted: false,
+          isSynced: false, // Custom tokens need to be synced
+          lastModified: now,
+          lastSyncTime: null,
+          version: 1
+        }
+      }
+      
+      for (const token of customTokens) {
+        await this.updateCacheForItem('token', token.symbol, createCustomTokenMetadata())
+      }
+      console.log('[DEBUG] forceResetAllMetadata - custom tokens restored successfully')
+    }
+
     // Set the global sync time to ensure everything is marked as synced
     this.setGlobalSyncTime(new Date())
 
     console.log('[DEBUG] forceResetAllMetadata - completed successfully')
+  }
+
+  /**
+   * Safely ensure preset data exists without destroying existing custom data
+   * This is the recommended method for normal app initialization
+   */
+  async ensurePresetDataExists(): Promise<void> {
+    console.log('[DEBUG] ensurePresetDataExists - ensuring preset data exists without clearing custom data')
+    
+    const createInitialMetadata = () => {
+      const now = new Date()
+      return {
+        isNew: false,
+        isModified: false,
+        isDeleted: false,
+        isSynced: true,
+        lastModified: now,
+        lastSyncTime: now,
+        version: 1
+      }
+    }
+
+    // Define preset locations
+    const presetLocations = [
+      { id: 'bitflyer', name: 'bitFlyer', type: 'domestic_cex' as const, isCustom: false },
+      { id: 'coincheck', name: 'Coincheck', type: 'domestic_cex' as const, isCustom: false },
+      { id: 'bitbank', name: 'bitbank', type: 'domestic_cex' as const, isCustom: false },
+      { id: 'gmo-coin', name: 'GMO Coin', type: 'domestic_cex' as const, isCustom: false },
+      { id: 'sbi-vc', name: 'SBI VC Trade', type: 'domestic_cex' as const, isCustom: false },
+      { id: 'binance', name: 'Binance', type: 'global_cex' as const, isCustom: false },
+      { id: 'coinbase', name: 'Coinbase', type: 'global_cex' as const, isCustom: false },
+      { id: 'kraken', name: 'Kraken', type: 'global_cex' as const, isCustom: false },
+      { id: 'bybit', name: 'Bybit', type: 'global_cex' as const, isCustom: false },
+      { id: 'okx', name: 'OKX', type: 'global_cex' as const, isCustom: false },
+      { id: 'metamask', name: 'MetaMask', type: 'sw_wallet' as const, isCustom: false },
+      { id: 'trust-wallet', name: 'Trust Wallet', type: 'sw_wallet' as const, isCustom: false },
+      { id: 'phantom', name: 'Phantom', type: 'sw_wallet' as const, isCustom: false },
+      { id: 'keplr', name: 'Keplr', type: 'sw_wallet' as const, isCustom: false },
+      { id: 'backpack', name: 'Backpack', type: 'sw_wallet' as const, isCustom: false },
+      { id: 'ledger', name: 'Ledger', type: 'hw_wallet' as const, isCustom: false },
+      { id: 'trezor', name: 'Trezor', type: 'hw_wallet' as const, isCustom: false }
+    ]
+
+    // Define preset tokens
+    const presetTokens = [
+      { symbol: 'BTC', name: 'Bitcoin', id: 'bitcoin' },
+      { symbol: 'ETH', name: 'Ethereum', id: 'ethereum' },
+      { symbol: 'BNB', name: 'BNB', id: 'binancecoin' },
+      { symbol: 'ADA', name: 'Cardano', id: 'cardano' },
+      { symbol: 'SOL', name: 'Solana', id: 'solana' },
+      { symbol: 'XRP', name: 'XRP', id: 'ripple' },
+      { symbol: 'DOT', name: 'Polkadot', id: 'polkadot' },
+      { symbol: 'DOGE', name: 'Dogecoin', id: 'dogecoin' },
+      { symbol: 'AVAX', name: 'Avalanche', id: 'avalanche-2' },
+      { symbol: 'SHIB', name: 'Shiba Inu', id: 'shiba-inu' },
+      { symbol: 'MATIC', name: 'Polygon', id: 'matic-network' },
+      { symbol: 'LTC', name: 'Litecoin', id: 'litecoin' },
+      { symbol: 'ATOM', name: 'Cosmos', id: 'cosmos' },
+      { symbol: 'LINK', name: 'Chainlink', id: 'chainlink' },
+      { symbol: 'UNI', name: 'Uniswap', id: 'uniswap' }
+    ]
+
+    // Ensure preset locations exist
+    for (const location of presetLocations) {
+      const exists = await dbV2.locations.get(location.id)
+      if (!exists) {
+        console.log(`[DEBUG] ensurePresetDataExists - adding missing preset location: ${location.id}`)
+        await dbV2.locations.put(location)
+        await this.updateCacheForItem('location', location.id, createInitialMetadata())
+      }
+    }
+
+    // Ensure preset tokens exist
+    for (const token of presetTokens) {
+      const exists = await dbV2.tokens.get(token.symbol)
+      if (!exists) {
+        console.log(`[DEBUG] ensurePresetDataExists - adding missing preset token: ${token.symbol}`)
+        await dbV2.tokens.put(token)
+        await this.updateCacheForItem('token', token.symbol, createInitialMetadata())
+      }
+    }
+
+    console.log('[DEBUG] ensurePresetDataExists - completed successfully')
+  }
+
+  /**
+   * Check if a token is a preset token
+   */
+  isPresetToken(symbol: string): boolean {
+    const presetSymbols = ['BTC', 'ETH', 'BNB', 'ADA', 'SOL', 'XRP', 'DOT', 'DOGE', 'AVAX', 'SHIB', 'MATIC', 'LTC', 'ATOM', 'LINK', 'UNI']
+    return presetSymbols.includes(symbol.toUpperCase())
+  }
+
+  /**
+   * Get all custom (non-preset) tokens from database
+   */
+  async getCustomTokens(): Promise<Token[]> {
+    try {
+      const allTokens = await dbV2.tokens.toArray()
+      const customTokens = allTokens.filter(token => !this.isPresetToken(token.symbol))
+      console.log(`[DEBUG] getCustomTokens - found ${customTokens.length} custom tokens:`, customTokens.map(t => t.symbol))
+      return customTokens
+    } catch (error) {
+      console.error('[DEBUG] getCustomTokens - failed:', error)
+      return []
+    }
+  }
+
+  /**
+   * Mark a token as custom
+   */
+  async markTokenAsCustom(symbol: string): Promise<void> {
+    try {
+      const token = await dbV2.tokens.get(symbol.toUpperCase())
+      if (token && !this.isPresetToken(token.symbol)) {
+        await dbV2.tokens.update(symbol.toUpperCase(), { isCustom: true })
+        console.log(`[DEBUG] markTokenAsCustom - marked ${symbol} as custom`)
+      }
+    } catch (error) {
+      console.error(`[DEBUG] markTokenAsCustom - failed for ${symbol}:`, error)
+    }
+  }
+
+  /**
+   * Ensure all custom tokens are properly marked
+   */
+  async ensureCustomTokensMarked(): Promise<void> {
+    try {
+      console.log('[DEBUG] ensureCustomTokensMarked - checking all tokens')
+      const allTokens = await dbV2.tokens.toArray()
+      
+      for (const token of allTokens) {
+        const shouldBeCustom = !this.isPresetToken(token.symbol)
+        if (shouldBeCustom && !token.isCustom) {
+          await dbV2.tokens.update(token.symbol, { isCustom: true })
+          console.log(`[DEBUG] ensureCustomTokensMarked - marked ${token.symbol} as custom`)
+        } else if (!shouldBeCustom && token.isCustom) {
+          await dbV2.tokens.update(token.symbol, { isCustom: false })
+          console.log(`[DEBUG] ensureCustomTokensMarked - marked ${token.symbol} as preset`)
+        }
+      }
+      
+      console.log('[DEBUG] ensureCustomTokensMarked - completed')
+    } catch (error) {
+      console.error('[DEBUG] ensureCustomTokensMarked - failed:', error)
+    }
   }
 
   /**

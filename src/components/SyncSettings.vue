@@ -207,6 +207,47 @@
       </p>
     </div>
 
+    <!-- 未同期データ管理カード -->
+    <div v-if="authStatus.isAuthenticated && unsyncedDataCount.total > 0" class="bg-gray-50 dark:bg-gray-700 rounded-lg p-4">
+      <h4 class="text-lg font-medium text-gray-900 dark:text-white mb-3 flex items-center">
+        <svg class="w-5 h-5 mr-2 text-red-500" fill="currentColor" viewBox="0 0 20 20">
+          <path fill-rule="evenodd" d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z" clip-rule="evenodd" />
+          <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414L9 11.414l2.293 2.293a1 1 0 001.414-1.414L10.414 10l2.293-2.293z" clip-rule="evenodd" />
+        </svg>
+        未同期データ管理
+      </h4>
+      
+      <div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-md p-3 mb-4">
+        <div class="flex items-start space-x-2">
+          <svg class="w-5 h-5 text-red-500 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+          </svg>
+          <div>
+            <p class="text-sm font-medium text-red-800 dark:text-red-400">
+              未同期データが {{ unsyncedDataCount.total }}件 あります
+            </p>
+            <p class="text-xs text-red-700 dark:text-red-300">
+              これらのデータはクラウドに保存されていません。一括削除すると復元できません。
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <button
+        @click="showDeleteConfirmModal = true"
+        :disabled="isDeletingUnsyncedData"
+        class="w-full font-medium py-3 px-4 rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 bg-red-600 hover:bg-red-700 text-white focus:ring-red-500 disabled:bg-red-400 disabled:cursor-not-allowed"
+      >
+        <div class="flex items-center justify-center space-x-2">
+          <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z" clip-rule="evenodd" />
+            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414L9 11.414l2.293 2.293a1 1 0 001.414-1.414L10.414 10l2.293-2.293z" clip-rule="evenodd" />
+          </svg>
+          <span>{{ isDeletingUnsyncedData ? '削除中...' : '未同期データを一括削除' }}</span>
+        </div>
+      </button>
+    </div>
+
 
 
 
@@ -238,6 +279,59 @@
 
 
 
+    <!-- Delete Confirmation Modal -->
+    <div v-if="showDeleteConfirmModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div class="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4">
+        <div class="flex items-center mb-4">
+          <svg class="w-6 h-6 text-red-500 mr-3" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+          </svg>
+          <h3 class="text-lg font-semibold text-gray-900 dark:text-white">
+            未同期データの一括削除
+          </h3>
+        </div>
+        
+        <div class="mb-6">
+          <p class="text-sm text-gray-600 dark:text-gray-400 mb-3">
+            以下の未同期データをすべて削除します：
+          </p>
+          <ul class="text-sm text-gray-700 dark:text-gray-300 space-y-1">
+            <li v-if="unsyncedDataCount.holdings > 0" class="flex items-center">
+              <span class="w-2 h-2 bg-red-500 rounded-full mr-2"></span>
+              保有数量: {{ unsyncedDataCount.holdings }}件
+            </li>
+            <li v-if="unsyncedDataCount.locations > 0" class="flex items-center">
+              <span class="w-2 h-2 bg-red-500 rounded-full mr-2"></span>
+              保管場所: {{ unsyncedDataCount.locations }}件
+            </li>
+            <li v-if="unsyncedDataCount.tokens > 0" class="flex items-center">
+              <span class="w-2 h-2 bg-red-500 rounded-full mr-2"></span>
+              トークン: {{ unsyncedDataCount.tokens }}件
+            </li>
+          </ul>
+          <p class="text-sm text-red-600 dark:text-red-400 mt-3 font-medium">
+            ⚠️ この操作は取り消せません。削除されたデータは復元できません。
+          </p>
+        </div>
+        
+        <div class="flex space-x-3">
+          <button
+            @click="showDeleteConfirmModal = false"
+            class="flex-1 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-200 dark:bg-gray-600 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-500 focus:outline-none focus:ring-2 focus:ring-gray-500"
+          >
+            キャンセル
+          </button>
+          <button
+            @click="handleDeleteUnsyncedData"
+            :disabled="isDeletingUnsyncedData"
+            class="flex-1 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 disabled:bg-red-400 disabled:cursor-not-allowed"
+          >
+            {{ isDeletingUnsyncedData ? '削除中...' : '削除する' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- Conflict Resolver Modal -->
     <ConflictResolver
       v-if="showConflictResolver"
@@ -264,6 +358,8 @@ import { useLocationsStore } from '@/stores/useLocations'
 const showConflictResolver = ref(false)
 const conflictData = ref<any>(null)
 const unsyncedDataCount = ref<any>({ holdings: 0, locations: 0, tokens: 0, total: 0 })
+const showDeleteConfirmModal = ref(false)
+const isDeletingUnsyncedData = ref(false)
 
 // Store instances for refreshing after sync
 const tokensStore = useTokensStore()
@@ -384,6 +480,83 @@ async function performManualSync() {
 
 
 
+
+async function handleDeleteUnsyncedData() {
+  try {
+    isDeletingUnsyncedData.value = true
+    console.log('[DEBUG] SyncSettings.handleDeleteUnsyncedData - starting bulk delete')
+    
+    // メタデータサービスから未同期データの詳細を取得
+    const { metadataService } = await import('@/services/metadata.service')
+    const unsyncedDetails = await metadataService.getUnsyncedDataDetails(syncStatus.value.isEnabled)
+    
+    console.log('[DEBUG] SyncSettings.handleDeleteUnsyncedData - found unsynced items:', unsyncedDetails.length)
+    
+    if (unsyncedDetails.length === 0) {
+      console.log('[DEBUG] SyncSettings.handleDeleteUnsyncedData - no unsynced data found')
+      showDeleteConfirmModal.value = false
+      return
+    }
+    
+    // データベースから未同期データを削除
+    const { dbV2 } = await import('@/services/db-v2')
+    
+    let deletedCount = 0
+    
+    for (const item of unsyncedDetails) {
+      try {
+        console.log('[DEBUG] SyncSettings.handleDeleteUnsyncedData - deleting:', item.type, item.id)
+        
+        switch (item.type) {
+          case 'holding':
+            await dbV2.holdings.delete(item.id)
+            break
+          case 'location':
+            // プリセット以外のカスタム場所のみ削除
+            const location = await dbV2.locations.get(item.id)
+            if (location && location.isCustom) {
+              await dbV2.locations.delete(item.id)
+            }
+            break
+          case 'token':
+            // プリセット以外のカスタムトークンのみ削除
+            const presetTokenSymbols = ['BTC', 'ETH', 'BNB', 'ADA', 'SOL', 'XRP', 'DOT', 'DOGE', 'AVAX', 'SHIB', 'MATIC', 'LTC', 'ATOM', 'LINK', 'UNI']
+            if (!presetTokenSymbols.includes(item.id)) {
+              await dbV2.tokens.delete(item.id)
+            }
+            break
+        }
+        
+        deletedCount++
+      } catch (error) {
+        console.error('[DEBUG] SyncSettings.handleDeleteUnsyncedData - failed to delete item:', item, error)
+      }
+    }
+    
+    // メタデータキャッシュをクリア
+    metadataService.clearMetadataCache()
+    
+    // ストアを更新
+    await refreshStores()
+    
+    console.log('[DEBUG] SyncSettings.handleDeleteUnsyncedData - completed, deleted:', deletedCount, 'items')
+    
+    // 成功メッセージを表示
+    if (window.showToast) {
+      window.showToast.success('削除完了', `${deletedCount}件の未同期データを削除しました`)
+    }
+    
+    showDeleteConfirmModal.value = false
+  } catch (error) {
+    console.error('[DEBUG] SyncSettings.handleDeleteUnsyncedData - error:', error)
+    
+    if (window.showToast) {
+      window.showToast.error('削除エラー', '未同期データの削除中にエラーが発生しました')
+    }
+  } finally {
+    isDeletingUnsyncedData.value = false
+  }
+}
 
 async function handleConflictResolved() {
   showConflictResolver.value = false

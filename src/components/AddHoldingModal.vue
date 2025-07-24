@@ -300,16 +300,6 @@ async function save() {
       locationId = customLocation.id
     }
 
-    // Add token to database if not exists
-    if (selectedToken.value) {
-      await tokensStore.addToken({
-        id: selectedToken.value.id,
-        symbol: selectedToken.value.symbol,
-        name: selectedToken.value.name,
-        iconUrl: selectedToken.value.iconUrl
-      })
-    }
-
     const holdingData = {
       locationId,
       symbol: selectedToken.value!.symbol.toUpperCase(),
@@ -317,28 +307,48 @@ async function save() {
       note: note.value.trim() || undefined
     }
 
-    // useHoldingsV2ストアを使用（同期状態は内部で処理される）
-    let success = false
-    let newHoldingId: string | number
-    
-    if (isEditing.value && props.holding) {
-      success = await holdingsStore.updateHolding(props.holding.id, holdingData)
-      newHoldingId = props.holding.id
-    } else {
-      success = await holdingsStore.addHolding(holdingData)
-      // 新規追加の場合、最新の保有データのIDを取得
-      const { dbV2 } = await import('@/services/db-v2')
-      const holdings = await dbV2.holdings.orderBy('updatedAt').reverse().limit(1).toArray()
-      newHoldingId = holdings[0]?.id || Date.now()
+    console.log('[DEBUG] AddHoldingModal - saving holding data:', holdingData)
+
+    // First, add token to database if it doesn't exist
+    if (selectedToken.value) {
+      try {
+        console.log('[DEBUG] AddHoldingModal - adding token:', selectedToken.value)
+        const tokenAddResult = await tokensStore.addToken({
+          id: selectedToken.value.id,
+          symbol: selectedToken.value.symbol,
+          name: selectedToken.value.name,
+          iconUrl: selectedToken.value.iconUrl
+        })
+        console.log('[DEBUG] AddHoldingModal - token add result:', tokenAddResult)
+      } catch (tokenError) {
+        console.warn('[DEBUG] AddHoldingModal - token add failed (but continuing):', tokenError)
+        // Don't fail the whole operation if token add fails
+      }
     }
 
+    // Then add/update the holding
+    let success = false
+    
+    if (isEditing.value && props.holding) {
+      console.log('[DEBUG] AddHoldingModal - updating existing holding:', props.holding.id)
+      success = await holdingsStore.updateHolding(props.holding.id, holdingData)
+    } else {
+      console.log('[DEBUG] AddHoldingModal - adding new holding')
+      success = await holdingsStore.addHolding(holdingData)
+    }
+
+    console.log('[DEBUG] AddHoldingModal - operation success:', success)
+
     if (success) {
+      console.log('[DEBUG] AddHoldingModal - operation completed successfully')
       emit('saved')
       
       // メタデータ処理と自動同期はuseHoldingsV2ストア内で実行されるため、
       // ここでは追加処理は不要
     } else {
-      error.value = isEditing.value ? 'データの更新に失敗しました' : 'データの追加に失敗しました'
+      const errorMsg = isEditing.value ? 'データの更新に失敗しました' : 'データの追加に失敗しました'
+      error.value = errorMsg
+      console.error('[DEBUG] AddHoldingModal - operation failed:', errorMsg)
     }
   } catch (err) {
     error.value = 'エラーが発生しました: ' + (err as Error).message

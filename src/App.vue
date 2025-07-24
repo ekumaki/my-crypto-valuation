@@ -204,15 +204,21 @@ onMounted(async () => {
     console.log('[DEBUG] App.vue sessionStore.initialize completed - sessionStore.isAuthenticated:', sessionStore.isAuthenticated)
   })
   
-  // Reset any legacy unsynced data on app startup
+  // Initialize preset data and clean up legacy metadata on app startup
   try {
     import('@/services/metadata.service').then(({ metadataService }) => {
-      // Force reset every time to ensure legacy data is cleared
-      console.log('[DEBUG] App.vue - forcing metadata reset on startup')
-      metadataService.forceResetAllMetadata().then(() => {
-        console.log('[DEBUG] App.vue - legacy unsynced data reset completed')
+      console.log('[DEBUG] App.vue - initializing preset data and cleaning legacy metadata')
+      
+      // First, ensure preset data exists (without deleting custom data)
+      metadataService.ensurePresetDataExists().then(() => {
+        console.log('[DEBUG] App.vue - preset data initialized')
         
-        // Additional cleanup of localStorage - more aggressive approach
+        // Then clean up legacy metadata
+        return metadataService.cleanupLegacyMetadata()
+      }).then(() => {
+        console.log('[DEBUG] App.vue - legacy metadata cleaned up')
+        
+        // Additional cleanup of localStorage - more targeted approach
         const keysToRemove: string[] = []
         const allKeys = []
         for (let i = 0; i < localStorage.length; i++) {
@@ -223,13 +229,14 @@ onMounted(async () => {
         for (const key of allKeys) {
           if (key && (
             key.includes('unsynced') || 
-            key.includes('metadata') || 
-            key.includes('syncData') ||
             key.includes('conflictData') ||
             key.includes('unsyncedCount') ||
             key.startsWith('holding_') ||
             key.startsWith('location_') ||
-            key.startsWith('token_')
+            // Remove this line to preserve custom tokens: key.startsWith('token_')
+            // Only remove specific problematic keys
+            key === 'syncData' ||
+            key === 'legacyDataResetCompleted'
           )) {
             keysToRemove.push(key)
           }
@@ -250,7 +257,7 @@ onMounted(async () => {
         }, 1000)
         
       }).catch(error => {
-        console.warn('[DEBUG] App.vue - failed to reset legacy unsynced data:', error)
+        console.warn('[DEBUG] App.vue - failed to initialize or clean up:', error)
       })
     })
   } catch (error) {

@@ -32,6 +32,7 @@ export interface Token {
   name: string
   id: string
   iconUrl?: string
+  isCustom?: boolean  // プリセット以外のカスタム追加トークンかどうか
 }
 
 // 集計データ用の型

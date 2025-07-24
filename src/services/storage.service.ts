@@ -117,12 +117,17 @@ export class SecureStorageService {
   }
   
   async addHolding(holding: Omit<Holding, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> {
+    console.log('[DEBUG] SecureStorage.addHolding - starting with:', holding)
+    
     if (!this.isUnlocked()) {
+      console.log('[DEBUG] SecureStorage.addHolding - storage is locked, attempting recovery')
       // 暗号化キーの自動復元を試行
       const recovered = await this.tryRecoverEncryptionKey()
       if (!recovered) {
-        throw new Error('Storage is locked and key recovery failed')
+        console.error('[DEBUG] SecureStorage.addHolding - storage is locked and key recovery failed')
+        throw new Error('暗号化ストレージがロックされており、キーの復元に失敗しました')
       }
+      console.log('[DEBUG] SecureStorage.addHolding - key recovery successful')
     }
     
     const now = Date.now()
@@ -133,43 +138,79 @@ export class SecureStorageService {
       updatedAt: now
     }
     
-    const encryptedHolding = await this.encryptHolding(newHolding)
+    console.log('[DEBUG] SecureStorage.addHolding - created holding object:', newHolding)
     
-    // Ensure token exists in tokens table
-    await dbServiceV2.ensureTokenExists(holding.symbol)
-    
-    await dbV2.table('holdings').add(encryptedHolding as any)
-    
-    // Update last data modified timestamp for sync
-    localStorage.setItem('lastDataModified', Date.now().toString())
-    
-    // Update metadata for sync tracking
     try {
-      const { metadataService } = await import('@/services/metadata.service')
-      const metadata = {
-        isNew: true,
-        isModified: false,
-        isDeleted: false,
-        isSynced: false, // 新規追加なので未同期
-        lastModified: new Date(now),
-        lastSyncTime: null,
-        version: 1
+      console.log('[DEBUG] SecureStorage.addHolding - starting encryption')
+      const encryptedHolding = await this.encryptHolding(newHolding)
+      console.log('[DEBUG] SecureStorage.addHolding - encryption successful')
+      
+      // Token should already exist from AddHoldingModal
+      // ensureTokenExists is only a fallback and shouldn't overwrite existing token info
+      // Commenting out to prevent overwriting token information
+      // try {
+      //   await dbServiceV2.ensureTokenExists(holding.symbol)
+      //   console.log('[DEBUG] SecureStorage.addHolding - token existence ensured for:', holding.symbol)
+      // } catch (tokenError) {
+      //   console.warn('[DEBUG] SecureStorage.addHolding - token ensure failed (continuing):', tokenError)
+      // }
+      
+      console.log('[DEBUG] SecureStorage.addHolding - adding to database')
+      await dbV2.table('holdings').add(encryptedHolding as any)
+      console.log('[DEBUG] SecureStorage.addHolding - successfully added to database')
+      
+      // Update last data modified timestamp for sync
+      localStorage.setItem('lastDataModified', Date.now().toString())
+      
+      // Update metadata for sync tracking (non-blocking)
+      setTimeout(async () => {
+        try {
+          const { metadataService } = await import('@/services/metadata.service')
+          const metadata = {
+            isNew: true,
+            isModified: false,
+            isDeleted: false,
+            isSynced: false, // 新規追加なので未同期
+            lastModified: new Date(now),
+            lastSyncTime: null,
+            version: 1
+          }
+          await metadataService.updateCacheForItem('holding', newHolding.id, metadata)
+          console.log('[DEBUG] SecureStorage.addHolding - metadata updated for new holding:', newHolding.id)
+        } catch (error) {
+          console.warn('[DEBUG] SecureStorage.addHolding - failed to update metadata (but save succeeded):', error)
+        }
+      }, 10)
+      
+      // データ変更時の自動同期をトリガー（非同期）
+      setTimeout(async () => {
+        try {
+          const { syncService } = await import('@/services/sync.service')
+          syncService.triggerSyncOnDataChange().catch(syncError => {
+            console.warn('[DEBUG] SecureStorage.addHolding - failed to trigger sync on data change:', syncError)
+          })
+        } catch (error) {
+          console.warn('[DEBUG] SecureStorage.addHolding - failed to setup sync trigger:', error)
+        }
+      }, 50)
+      
+      console.log('[DEBUG] SecureStorage.addHolding - operation completed successfully:', newHolding.id)
+      return newHolding.id
+    } catch (encryptionError) {
+      console.error('[DEBUG] SecureStorage.addHolding - encryption or save failed:', encryptionError)
+      
+      if (encryptionError instanceof Error) {
+        if (encryptionError.message.includes('encrypt')) {
+          throw new Error(`データの暗号化に失敗しました: ${encryptionError.message}`)
+        } else if (encryptionError.message.includes('add')) {
+          throw new Error(`データベースへの保存に失敗しました: ${encryptionError.message}`)
+        } else {
+          throw new Error(`保存処理中にエラーが発生しました: ${encryptionError.message}`)
+        }
+      } else {
+        throw new Error('保存処理中に予期しないエラーが発生しました')
       }
-      metadataService.updateCacheForItem('holding', newHolding.id, metadata)
-      console.log('[DEBUG] addHolding - metadata updated for new holding:', newHolding.id)
-    } catch (error) {
-      console.warn('Failed to update metadata for new holding:', error)
     }
-    
-    // データ変更時の自動同期をトリガー
-    try {
-      const { syncService } = await import('@/services/sync.service')
-      await syncService.triggerSyncOnDataChange()
-    } catch (error) {
-      console.warn('Failed to trigger sync on data change:', error)
-    }
-    
-    return newHolding.id
   }
   
   async updateHolding(id: string, updates: Partial<Omit<Holding, 'id' | 'createdAt'>>): Promise<number> {
@@ -430,7 +471,14 @@ export class SecureStorageService {
   }
 
   async ensureInitialDataExists(): Promise<void> {
-    // This is now handled by metadataService.forceResetAllMetadata
+    console.log('[DEBUG] ensureInitialDataExists - ensuring preset data exists safely')
+    try {
+      const { metadataService } = await import('@/services/metadata.service')
+      await metadataService.ensurePresetDataExists()
+      console.log('[DEBUG] ensureInitialDataExists - completed successfully')
+    } catch (error) {
+      console.error('[DEBUG] ensureInitialDataExists - failed:', error)
+    }
   }
   
   async getAuthState(): Promise<AuthState> {

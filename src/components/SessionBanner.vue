@@ -146,6 +146,10 @@ async function checkUnsyncedData() {
     
     // メタデータサービスから未同期件数を取得
     const { metadataService } = await import('@/services/metadata.service')
+    
+    // キャッシュをクリアして最新データを確実に取得
+    metadataService.clearMetadataCache()
+    
     const unsyncedData = await metadataService.getUnsyncedDataCount(isSyncEnabled)
     unsyncedCount.value = unsyncedData.total
     
