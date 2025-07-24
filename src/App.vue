@@ -110,13 +110,6 @@
       </div>
     </div>
     
-    <!-- Conflict Resolver Modal -->
-    <ConflictResolver
-      v-if="syncService.status.value.conflictDetected && syncService.conflictData.value"
-      :conflict-data="syncService.conflictData.value"
-      @close="handleConflictClose"
-      @resolved="handleConflictResolved"
-    />
   </div>
 </template>
 
@@ -128,7 +121,6 @@ import LoginForm from '@/components/LoginForm.vue'
 import SessionBanner from '@/components/SessionBanner.vue'
 import TimeoutWarning from '@/components/TimeoutWarning.vue'
 import SyncSettings from '@/components/SyncSettings.vue'
-import ConflictResolver from '@/components/ConflictResolver.vue'
 import { useSessionStore } from '@/stores/session.store'
 import { syncService } from '@/services/sync'
 
@@ -172,14 +164,6 @@ async function handleLoginSuccess() {
   console.log('[DEBUG] Navigation to /edit completed')
 }
 
-function handleConflictClose() {
-  // 競合をクリアして閉じる処理は不要（ConflictResolver内で処理される）
-}
-
-function handleConflictResolved() {
-  // 競合解決後の処理（必要に応じて）
-  console.log('[DEBUG] Conflict resolved successfully')
-}
 
 onMounted(async () => {
   // Initialize dark mode from localStorage

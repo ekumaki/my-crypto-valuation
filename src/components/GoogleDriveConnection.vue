@@ -131,15 +131,9 @@
           <p class="text-sm font-medium text-yellow-800 dark:text-yellow-400">
             同期競合が検出されました
           </p>
-          <p class="text-sm text-yellow-700 dark:text-yellow-300 mb-2">
-            ローカルデータとクラウドデータに違いがあります
+          <p class="text-sm text-yellow-700 dark:text-yellow-300">
+            ローカルデータとクラウドデータに違いがあります。「今すぐ同期」で解決できます。
           </p>
-          <button
-            @click="showConflictResolver = true"
-            class="text-sm bg-yellow-500 hover:bg-yellow-600 text-white px-3 py-1 rounded transition-colors"
-          >
-            競合を解決
-          </button>
         </div>
       </div>
     </div>
@@ -202,13 +196,6 @@
 
 
 
-    <!-- Conflict Resolver Modal -->
-    <ConflictResolver
-      v-if="showConflictResolver && conflictData"
-      :conflict-data="conflictData"
-      @close="showConflictResolver = false"
-      @conflict-resolved="handleConflictResolved"
-    />
   </div>
 </template>
 
@@ -221,9 +208,7 @@ import { useTokensStore } from '@/stores/useTokens'
 import { useHoldingsStoreV2 } from '@/stores/useHoldingsV2'
 import { useLocationsStore } from '@/stores/useLocations'
 
-import ConflictResolver from './ConflictResolver.vue'
 
-const showConflictResolver = ref(false)
 const conflictData = ref<SyncConflict | null>(null)
 
 // Store instances for refreshing after sync
@@ -286,7 +271,8 @@ async function handleEnableSyncClick() {
       console.error('Enable sync failed:', result.message)
       if (result.conflictData) {
         conflictData.value = result.conflictData
-        showConflictResolver.value = true
+        // 競合データは設定されるが、自動でConflictResolverは開かない
+        // ユーザーは「今すぐ同期」ボタンで競合解決画面にアクセスできる
       } else {
         errorHandlerService.handleError(new Error(result.message), 'Enable Sync', 'error')
       }
@@ -323,7 +309,8 @@ async function performManualSync() {
     if (!result.success) {
       if (result.conflictData) {
         conflictData.value = result.conflictData
-        showConflictResolver.value = true
+        // 競合検出時は既にConflictResolverが自動で開かれている
+        // (syncService.performSync内で処理される)
       } else {
         errorHandlerService.handleError(new Error(result.message), 'Manual Sync', 'error')
       }
@@ -350,10 +337,6 @@ async function disableSync() {
   }
 }
 
-async function handleConflictResolved() {
-  showConflictResolver.value = false
-  conflictData.value = null
-}
 
 function formatLastSyncTime(timestamp: number): string {
   const date = new Date(timestamp)

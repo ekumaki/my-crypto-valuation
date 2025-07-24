@@ -1,1 +1,0 @@
-import{a as n,u as i}from"./index-CNHkD-Ra.js";async function r(){return await n.isUnlockedAndAuthenticated()?!0:await n.isAuthenticated()?await i().requestUnlock():!1}async function a(t,e){return await r()?await t():e?e():void 0}export{r as ensureUnlocked,a as withEncryption};
