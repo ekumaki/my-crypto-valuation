@@ -8,14 +8,11 @@ export const useLocationsStore = defineStore('locations', () => {
   const error = ref<string | null>(null)
 
   async function ensureInitialLocationsExist() {
-    console.log('[DEBUG] ensureInitialLocationsExist - checking if initial data exists...')
     
     // Check if locations exist
     const locationCount = await dbV2.locations.count()
-    console.log('[DEBUG] ensureInitialLocationsExist - location count:', locationCount)
     
     if (locationCount === 0) {
-      console.log('[DEBUG] ensureInitialLocationsExist - populating locations...')
       const presetLocations = [
         // Domestic CEX
         { id: 'bitflyer', name: 'bitFlyer', type: 'domestic_cex' as const, isCustom: false },
@@ -45,9 +42,7 @@ export const useLocationsStore = defineStore('locations', () => {
       
       try {
         await dbV2.locations.bulkAdd(presetLocations)
-        console.log('[DEBUG] ensureInitialLocationsExist - locations populated successfully')
       } catch (error) {
-        console.error('[DEBUG] ensureInitialLocationsExist - failed to populate locations:', error)
       }
     }
   }
@@ -57,20 +52,15 @@ export const useLocationsStore = defineStore('locations', () => {
       isLoading.value = true
       error.value = null
       
-      console.log('[DEBUG] loadLocations - starting to load locations...')
       
       // Check database state first
       const dbLocationCount = await dbV2.locations.count()
-      console.log('[DEBUG] loadLocations - database location count:', dbLocationCount)
       
       if (dbLocationCount === 0) {
-        console.log('[DEBUG] loadLocations - no locations found, ensuring initial data exists...')
         await ensureInitialLocationsExist()
       }
       
       locations.value = await dbServiceV2.getLocations()
-      console.log('[DEBUG] loadLocations - loaded locations:', locations.value.length)
-      console.log('[DEBUG] loadLocations - location details:', locations.value.map(l => ({ id: l.id, name: l.name, type: l.type })))
     } catch (err) {
       error.value = '場所の読み込みに失敗しました'
       console.error('Failed to load locations:', err)
@@ -84,7 +74,6 @@ export const useLocationsStore = defineStore('locations', () => {
       error.value = null
       const location = await dbServiceV2.addCustomLocation(name)
       locations.value.push(location)
-      console.log('[DEBUG] Added custom location:', location)
       
       // データ変更時の自動同期をトリガー
       try {
@@ -104,7 +93,6 @@ export const useLocationsStore = defineStore('locations', () => {
 
   function getLocationsByType(type: LocationType): Location[] {
     const filtered = locations.value.filter(location => location.type === type)
-    console.log(`[DEBUG] getLocationsByType(${type}):`, filtered.length, 'locations')
     return filtered
   }
 

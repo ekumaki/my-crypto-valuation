@@ -69,7 +69,6 @@ export class MetadataCacheService {
   clearCache(): void {
     this.metadataCache.clear()
     this.cacheExpiry = null
-    console.log('[MetadataCache] Cache cleared')
   }
 
   /**
@@ -181,7 +180,6 @@ export class MetadataCacheService {
    */
   refresh(): void {
     this.clearCache()
-    console.log('[MetadataCache] Cache refreshed')
   }
 }
 

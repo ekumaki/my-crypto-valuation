@@ -32,28 +32,23 @@ export const useSessionStore = defineStore('session', () => {
       const { secureStorage } = await import('@/services/storage.service')
       
       if (secureStorage.isUnlocked()) {
-        console.log('[DEBUG] attemptAutoUnlock - storage already unlocked')
         return true
       }
 
       // Google認証状態をチェック
       const { googleAuthService } = await import('@/services/google-auth.service')
       if (!googleAuthService.isAuthenticated.value || !googleAuthService.user.value) {
-        console.log('[DEBUG] attemptAutoUnlock - not authenticated with Google')
         return false
       }
 
       // Google認証情報から暗号化キーを復元
       const unlockResult = await authService.unlockWithGoogleAuth()
       if (unlockResult.success) {
-        console.log('[DEBUG] attemptAutoUnlock - successfully unlocked with Google auth')
         return true
       } else {
-        console.log('[DEBUG] attemptAutoUnlock - failed to unlock with Google auth:', unlockResult.error)
         return false
       }
     } catch (error) {
-      console.error('[DEBUG] attemptAutoUnlock - error during auto unlock:', error)
       return false
     }
   }
@@ -93,9 +88,7 @@ export const useSessionStore = defineStore('session', () => {
       // Don't override authentication state if already authenticated
       if (!isAuthenticated.value) {
         isAuthenticated.value = await authService.isAuthenticated()
-        console.log('[DEBUG] Session initialize - isAuthenticated:', isAuthenticated.value)
       } else {
-        console.log('[DEBUG] Session initialize - already authenticated, skipping authService check')
       }
       if (isAuthenticated.value) {
         // セッション開始時間を復元
@@ -105,12 +98,9 @@ export const useSessionStore = defineStore('session', () => {
           const elapsedTime = Date.now() - savedStartTime
           const newRemainingTime = Math.max(0, totalSessionTime - elapsedTime)
           
-          console.log('[DEBUG] Restored session start time:', new Date(savedStartTime))
-          console.log('[DEBUG] Calculated remaining time on restore:', newRemainingTime / 1000, 'seconds')
           
           // セッションが期限切れの場合は新しいセッションを開始
           if (newRemainingTime <= 0) {
-            console.log('[DEBUG] Session expired during restore, clearing old session and starting fresh')
             clearSessionStartTime()
             sessionStartTime.value = Date.now()
             saveSessionStartTime(sessionStartTime.value)
@@ -126,11 +116,9 @@ export const useSessionStore = defineStore('session', () => {
         const autoUnlockSuccess = await attemptAutoUnlock()
 
         if (!secureStorage.isUnlocked() && !autoUnlockSuccess) {
-          console.log('[DEBUG] Authentication exists but storage is locked and auto unlock failed - showing unlock prompt')
           showUnlockPrompt.value = true
           storageUnlocked.value = false
         } else {
-          console.log('[DEBUG] Storage is already unlocked or auto unlock succeeded')
           showUnlockPrompt.value = false
           storageUnlocked.value = true
         }
@@ -141,12 +129,10 @@ export const useSessionStore = defineStore('session', () => {
           // セッション開始時間が保存されていない場合は新しく設定
           sessionStartTime.value = Date.now()
           saveSessionStartTime(sessionStartTime.value)
-          console.log('[DEBUG] Set new session start time for authenticated user:', new Date(sessionStartTime.value))
         }
         startWarningCountdown()
         
         setupActivityListeners()
-        console.log('[DEBUG] Session initialized successfully')
       }
     } finally {
       isLoading.value = false
@@ -154,28 +140,22 @@ export const useSessionStore = defineStore('session', () => {
   }
   
   async function login(authType: string = 'password') {
-    console.log('[DEBUG] sessionStore.login() called - before setting isAuthenticated:', isAuthenticated.value)
     isAuthenticated.value = true
-    console.log('[DEBUG] sessionStore.login() called - after setting isAuthenticated:', isAuthenticated.value)
     
     // ログイン時にセッション開始時間を設定
     sessionStartTime.value = Date.now()
     saveSessionStartTime(sessionStartTime.value)
-    console.log('[DEBUG] login - new session start time:', new Date(sessionStartTime.value), 'auth type:', authType)
     
     // Google認証情報から暗号化キーが設定されていることを確認
     try {
       const { secureStorage } = await import('@/services/storage.service')
       if (secureStorage.isUnlocked()) {
-        console.log('[DEBUG] login - storage is unlocked and ready')
         storageUnlocked.value = true
       } else {
-        console.log('[DEBUG] login - storage is not unlocked, attempting auto unlock')
         const unlockSuccess = await attemptAutoUnlock()
         storageUnlocked.value = unlockSuccess
       }
     } catch (error) {
-      console.error('[DEBUG] login - failed to verify storage state:', error)
       storageUnlocked.value = false
     }
     
@@ -184,7 +164,6 @@ export const useSessionStore = defineStore('session', () => {
   }
   
   async function logout() {
-    console.log('[DEBUG] sessionStore.logout() called - Stack trace:')
     console.trace()
     clearWarningTimer()
     removeActivityListeners()
@@ -199,12 +178,10 @@ export const useSessionStore = defineStore('session', () => {
   }
 
   async function logoutAndDiscardChanges() {
-    console.log('[DEBUG] sessionStore.logoutAndDiscardChanges() called')
     try {
       // 1. 競合状態をクリア
       const { syncService } = await import('@/services/sync.service')
       syncService.clearConflictState()
-      console.log('[DEBUG] logoutAndDiscardChanges - cleared conflict state')
       
       // 2. 未同期データを完全に破棄
       await discardUnsyncedData()
@@ -212,9 +189,7 @@ export const useSessionStore = defineStore('session', () => {
       // 3. 追加のクリーンアップ処理
       await performAdditionalCleanup()
       
-      console.log('[DEBUG] logoutAndDiscardChanges - all cleanup completed')
     } catch (error) {
-      console.warn('[DEBUG] logoutAndDiscardChanges - failed to clear sync state:', error)
     }
     
     // 通常のログアウト処理を実行
@@ -222,7 +197,6 @@ export const useSessionStore = defineStore('session', () => {
   }
   
   async function performAdditionalCleanup() {
-    console.log('[DEBUG] performAdditionalCleanup - starting')
     
     try {
       // 同期関連のlocalStorageキーをクリア
@@ -236,43 +210,35 @@ export const useSessionStore = defineStore('session', () => {
       
       for (const key of syncKeys) {
         localStorage.removeItem(key)
-        console.log('[DEBUG] performAdditionalCleanup - removed localStorage key:', key)
       }
       
       // セッションストレージもクリア
       sessionStorage.removeItem('encryptionKey')
-      console.log('[DEBUG] performAdditionalCleanup - cleared session storage')
       
       // メタデータサービスの状態を完全にリセット
       const { metadataService } = await import('@/services/metadata.service')
       metadataService.clearMetadataCache()
       await metadataService.forceResetAllMetadata()
       
-      console.log('[DEBUG] performAdditionalCleanup - completed')
     } catch (error) {
-      console.error('[DEBUG] performAdditionalCleanup - error:', error)
     }
   }
   
   async function discardUnsyncedData() {
-    console.log('[DEBUG] discardUnsyncedData - starting complete cleanup')
     
     try {
       const { metadataService } = await import('@/services/metadata.service')
       const { syncService } = await import('@/services/sync.service')
       const { dbV2 } = await import('@/services/db-v2')
       
-      console.log('[DEBUG] discardUnsyncedData - clearing all user data')
       
       // 1. すべての保有データを削除
       const allHoldings = await dbV2.holdings.toArray()
-      console.log('[DEBUG] discardUnsyncedData - found holdings to delete:', allHoldings.length)
       await dbV2.holdings.clear()
       
       // 2. カスタムロケーションを削除（プリセットは保持）
       const allLocations = await dbV2.locations.toArray()
       const customLocations = allLocations.filter(location => location.isCustom)
-      console.log('[DEBUG] discardUnsyncedData - found custom locations to delete:', customLocations.length)
       for (const location of customLocations) {
         await dbV2.locations.delete(location.id)
       }
@@ -281,7 +247,6 @@ export const useSessionStore = defineStore('session', () => {
       const presetTokenSymbols = ['BTC', 'ETH', 'BNB', 'ADA', 'SOL', 'XRP', 'DOT', 'DOGE', 'AVAX', 'SHIB', 'MATIC', 'LTC', 'ATOM', 'LINK', 'UNI']
       const allTokens = await dbV2.tokens.toArray()
       const customTokens = allTokens.filter(token => !presetTokenSymbols.includes(token.symbol))
-      console.log('[DEBUG] discardUnsyncedData - found custom tokens to delete:', customTokens.length)
       for (const token of customTokens) {
         await dbV2.tokens.delete(token.symbol)
       }
@@ -316,23 +281,19 @@ export const useSessionStore = defineStore('session', () => {
       // 6. グローバル同期時刻を設定
       metadataService.setGlobalSyncTime(now)
       
-      console.log('[DEBUG] discardUnsyncedData - complete cleanup finished')
       
     } catch (error) {
-      console.error('[DEBUG] discardUnsyncedData - error during cleanup:', error)
     }
   }
   
   function extendSession() {
     // 明示的なセッション延長時のみ警告をクリアして時間をリセット
-    console.log('[DEBUG] extendSession called - resetting session timer')
     authService.extendSession()
     showWarning.value = false
     
     // セッション延長時は新しい開始時間を設定
     sessionStartTime.value = Date.now()
     saveSessionStartTime(sessionStartTime.value)
-    console.log('[DEBUG] extendSession - new session start time:', new Date(sessionStartTime.value))
     
     startWarningCountdown()
   }
@@ -345,21 +306,17 @@ export const useSessionStore = defineStore('session', () => {
     if (sessionStartTime.value === 0) {
       sessionStartTime.value = Date.now()
       saveSessionStartTime(sessionStartTime.value)
-      console.log('[DEBUG] Set new session start time:', new Date(sessionStartTime.value))
     } else {
       // 既存のセッション開始時間を使用（復元後の場合）
-      console.log('[DEBUG] Using existing session start time:', new Date(sessionStartTime.value))
     }
     
     remainingTime.value = Math.max(0, totalSessionTime - (Date.now() - sessionStartTime.value))
-    console.log('[DEBUG] startWarningCountdown - initial remainingTime:', remainingTime.value / 1000, 'seconds')
     
     const updateCountdown = () => {
       // 実際の経過時間から残り時間を計算
       const elapsedTime = Date.now() - sessionStartTime.value
       const newRemainingTime = Math.max(0, totalSessionTime - elapsedTime)
       remainingTime.value = newRemainingTime
-      console.log('[DEBUG] updateCountdown - remainingTime:', remainingTime.value / 1000, 'seconds')
       
       if (remainingTime.value <= 5 * 60 * 1000 && !showWarning.value) {
         showWarning.value = true
@@ -465,7 +422,6 @@ export const useSessionStore = defineStore('session', () => {
   }
   
   async function handleUnlockSuccess() {
-    console.log('[DEBUG] handleUnlockSuccess - refreshing stores')
     
     // アンロック成功時にキーをセッションストレージとローカルストレージに保存
     try {
@@ -476,35 +432,24 @@ export const useSessionStore = defineStore('session', () => {
         const exportedKey = await CryptoService.exportKey(key)
         sessionStorage.setItem('encryptionKey', exportedKey)
         localStorage.setItem('encryptionKey', exportedKey)
-        console.log('[DEBUG] Encryption key exported and saved to session and local storage')
       }
     } catch (error) {
-      console.warn('[DEBUG] Failed to save encryption key to storage:', error)
     }
     
     // Refresh all stores after unlock BEFORE closing prompt
     try {
       const { secureStorage } = await import('@/services/storage.service')
-      console.log('[DEBUG] Before store refresh - storage unlocked:', secureStorage.isUnlocked())
       
       // Test basic database access with detailed error info
       try {
-        console.log('[DEBUG] Testing database access...')
         const testHoldings = await secureStorage.getHoldings()
-        console.log('[DEBUG] Direct getHoldings test successful, count:', testHoldings.length)
       } catch (testError) {
-        console.error('[DEBUG] Direct getHoldings test failed:', testError)
-        console.error('[DEBUG] Error name:', (testError as Error).name)
-        console.error('[DEBUG] Error message:', (testError as Error).message)
-        console.error('[DEBUG] Error stack:', (testError as Error).stack)
         
         // Try alternative database access
         try {
           const { dbV2 } = await import('@/services/db-v2')
           const rawHoldings = await dbV2.holdings.toArray()
-          console.log('[DEBUG] Raw database access successful, count:', rawHoldings.length)
         } catch (rawError) {
-          console.error('[DEBUG] Raw database access also failed:', rawError)
         }
       }
       
@@ -516,40 +461,29 @@ export const useSessionStore = defineStore('session', () => {
       const holdingsStore = useHoldingsStoreV2()
       const locationsStore = useLocationsStore()
       
-      console.log('[DEBUG] Starting store refresh...')
       
       // Refresh stores individually with error handling
       try {
         await tokensStore.loadTokens()
-        console.log('[DEBUG] Tokens loaded successfully')
       } catch (error) {
-        console.error('[DEBUG] Failed to load tokens:', error)
       }
       
       try {
         await holdingsStore.loadHoldings()
-        console.log('[DEBUG] Holdings loaded successfully')
       } catch (error) {
-        console.error('[DEBUG] Failed to load holdings:', error)
       }
       
       try {
         await holdingsStore.loadAggregatedHoldings()
-        console.log('[DEBUG] Aggregated holdings loaded successfully')
       } catch (error) {
-        console.error('[DEBUG] Failed to load aggregated holdings:', error)
       }
       
       try {
         await locationsStore.loadLocations()
-        console.log('[DEBUG] Locations loaded successfully')
       } catch (error) {
-        console.error('[DEBUG] Failed to load locations:', error)
       }
       
-      console.log('[DEBUG] All stores refresh completed')
     } catch (error) {
-      console.error('[DEBUG] Error refreshing stores after unlock:', error)
     }
     
     // Wait a bit for all reactive updates to complete
@@ -563,7 +497,6 @@ export const useSessionStore = defineStore('session', () => {
     
     // アンロック成功後にセッションタイマーを再開
     if (sessionStartTime.value > 0) {
-      console.log('[DEBUG] Restarting session timer after unlock')
       startWarningCountdown()
     }
     

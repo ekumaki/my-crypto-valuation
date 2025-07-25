@@ -307,21 +307,17 @@ async function save() {
       note: note.value.trim() || undefined
     }
 
-    console.log('[DEBUG] AddHoldingModal - saving holding data:', holdingData)
 
     // First, add token to database if it doesn't exist
     if (selectedToken.value) {
       try {
-        console.log('[DEBUG] AddHoldingModal - adding token:', selectedToken.value)
         const tokenAddResult = await tokensStore.addToken({
           id: selectedToken.value.id,
           symbol: selectedToken.value.symbol,
           name: selectedToken.value.name,
           iconUrl: selectedToken.value.iconUrl
         })
-        console.log('[DEBUG] AddHoldingModal - token add result:', tokenAddResult)
       } catch (tokenError) {
-        console.warn('[DEBUG] AddHoldingModal - token add failed (but continuing):', tokenError)
         // Don't fail the whole operation if token add fails
       }
     }
@@ -330,17 +326,13 @@ async function save() {
     let success = false
     
     if (isEditing.value && props.holding) {
-      console.log('[DEBUG] AddHoldingModal - updating existing holding:', props.holding.id)
       success = await holdingsStore.updateHolding(props.holding.id, holdingData)
     } else {
-      console.log('[DEBUG] AddHoldingModal - adding new holding')
       success = await holdingsStore.addHolding(holdingData)
     }
 
-    console.log('[DEBUG] AddHoldingModal - operation success:', success)
 
     if (success) {
-      console.log('[DEBUG] AddHoldingModal - operation completed successfully')
       emit('saved')
       
       // メタデータ処理と自動同期はuseHoldingsV2ストア内で実行されるため、
@@ -348,7 +340,6 @@ async function save() {
     } else {
       const errorMsg = isEditing.value ? 'データの更新に失敗しました' : 'データの追加に失敗しました'
       error.value = errorMsg
-      console.error('[DEBUG] AddHoldingModal - operation failed:', errorMsg)
     }
   } catch (err) {
     error.value = 'エラーが発生しました: ' + (err as Error).message
@@ -379,12 +370,10 @@ watch(() => props.holding, (holding) => {
 }, { immediate: true })
 
 onMounted(async () => {
-  console.log('[DEBUG] AddHoldingModal - starting data load')
   
   // Check database state before loading
   const { dbV2 } = await import('@/services/db-v2')
   const dbLocationCount = await dbV2.locations.count()
-  console.log('[DEBUG] AddHoldingModal - database location count before load:', dbLocationCount)
   
   await Promise.all([
     tokensStore.loadTokens(),
@@ -393,16 +382,8 @@ onMounted(async () => {
   
   // Check database state after loading
   const dbLocationCountAfter = await dbV2.locations.count()
-  console.log('[DEBUG] AddHoldingModal - database location count after load:', dbLocationCountAfter)
   
-  console.log('[DEBUG] AddHoldingModal - data load completed')
-  console.log('[DEBUG] Total locations loaded:', locationsStore.locations.length)
-  console.log('[DEBUG] Domestic CEX:', domesticCEX.value.length)
-  console.log('[DEBUG] Global CEX:', globalCEX.value.length)
-  console.log('[DEBUG] SW Wallets:', swWallets.value.length)
-  console.log('[DEBUG] HW Wallets:', hwWallets.value.length)
   
   // Additional debugging: list actual location data
-  console.log('[DEBUG] AddHoldingModal - actual location data:', locationsStore.locations.map(l => ({ id: l.id, name: l.name, type: l.type })))
 })
 </script>

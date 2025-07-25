@@ -76,20 +76,15 @@ export class CryptoPortfolioDBV2 extends Dexie {
   }
   
   private async populate() {
-    console.log('[DEBUG] DB populate - initializing with safe preset data')
     try {
       const { metadataService } = await import('@/services/metadata.service')
       await metadataService.ensurePresetDataExists()
-      console.log('[DEBUG] DB populate - completed successfully with ensurePresetDataExists')
     } catch (error) {
-      console.error('[DEBUG] DB populate - failed:', error)
       // Fallback: still try to ensure basic data exists
-      console.log('[DEBUG] DB populate - falling back to forceResetAllMetadata')
       try {
         const { metadataService } = await import('@/services/metadata.service')
         await metadataService.forceResetAllMetadata()
       } catch (fallbackError) {
-        console.error('[DEBUG] DB populate - fallback also failed:', fallbackError)
       }
     }
   }
@@ -124,7 +119,6 @@ export const dbServiceV2 = {
   // Location operations
   async getLocations(): Promise<Location[]> {
     const locations = await dbV2.locations.orderBy('name').toArray()
-    console.log('[DEBUG] dbServiceV2.getLocations - returning', locations.length, 'locations')
     return locations
   },
 
@@ -259,17 +253,13 @@ export const dbServiceV2 = {
     if (existingToken) {
       // If token already exists, only update if new token has more information
       if (token.iconUrl && !existingToken.iconUrl) {
-        console.log(`[DEBUG] addToken - updating token with icon: ${upperSymbol}`)
         await dbV2.tokens.put({ ...existingToken, ...token, symbol: upperSymbol })
       } else if (token.name !== upperSymbol && existingToken.name === upperSymbol) {
         // Update if we have a proper name instead of just the symbol
-        console.log(`[DEBUG] addToken - updating token with proper name: ${upperSymbol}`)
         await dbV2.tokens.put({ ...existingToken, ...token, symbol: upperSymbol })
       } else {
-        console.log(`[DEBUG] addToken - token already exists with full info, skipping: ${upperSymbol}`)
       }
     } else {
-      console.log(`[DEBUG] addToken - adding new token: ${upperSymbol}`)
       await dbV2.tokens.put({ ...token, symbol: upperSymbol })
     }
   },
@@ -281,7 +271,6 @@ export const dbServiceV2 = {
     if (!existingToken) {
       // Only add a basic token if it doesn't exist at all
       // This is a fallback for tokens that weren't properly added
-      console.log(`[DEBUG] ensureTokenExists - creating fallback token for: ${upperSymbol}`)
       await this.addToken({
         symbol: upperSymbol,
         name: upperSymbol, // Use symbol as name for unknown tokens
@@ -297,7 +286,6 @@ export const dbServiceV2 = {
         console.warn('Failed to trigger sync on token ensure:', error)
       }
     } else {
-      console.log(`[DEBUG] ensureTokenExists - token already exists: ${upperSymbol}`, existingToken)
     }
   },
 
@@ -319,7 +307,6 @@ export const dbServiceV2 = {
             if (foundToken && foundToken.thumb) {
               // アイコンURLを更新
               await dbV2.tokens.update(token.symbol, { iconUrl: foundToken.thumb })
-              console.log(`Updated icon for ${token.symbol}:`, foundToken.thumb)
             }
           } catch (error) {
             console.warn(`Failed to update icon for ${token.symbol}:`, error)

@@ -122,7 +122,6 @@ async function handleGoogleAuth() {
     const { useSessionStore } = await import('@/stores/session.store')
     const sessionStore = useSessionStore()
     await sessionStore.login('google')
-    console.log('[DEBUG] Session started, isAuthenticated:', sessionStore.isAuthenticated)
 
     // 同期を有効化
     let syncResult
@@ -138,7 +137,6 @@ async function handleGoogleAuth() {
     }
 
     // ログイン成功
-    console.log('[DEBUG] Emitting loginSuccess from handleGoogleAuth')
     emit('loginSuccess')
   } catch (err: any) {
     console.error('Google authentication failed:', err)

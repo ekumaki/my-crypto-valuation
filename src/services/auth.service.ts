@@ -268,19 +268,15 @@ export class AuthService {
         ...authState,
         isAuthenticated: true
       }
-      console.log('[DEBUG] Setting auth state to:', newAuthState)
       await secureStorage.setAuthState(newAuthState)
       
       const verifyState = await secureStorage.getAuthState()
-      console.log('[DEBUG] Verified auth state after setting:', verifyState)
       
       // 初期データを確実に同期済みとしてマーク
       try {
         const { metadataService } = await import('./metadata.service')
         await metadataService.ensurePresetDataExists()
-        console.log('[DEBUG] unlockWithGoogleAuth - initial data marked as synced')
       } catch (error) {
-        console.warn('[DEBUG] unlockWithGoogleAuth - failed to mark initial data as synced:', error)
       }
       
       return { success: true }

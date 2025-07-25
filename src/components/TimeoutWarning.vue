@@ -77,7 +77,6 @@ async function refreshUnsyncedCount() {
     const unsyncedData = await metadataService.getUnsyncedDataCount(isSyncEnabled)
     unsyncedCount.value = unsyncedData.total
     
-    console.log('[DEBUG] TimeoutWarning.refreshUnsyncedCount - updated count:', unsyncedCount.value)
   } catch (error) {
     console.error('Failed to refresh unsynced data count:', error)
     unsyncedCount.value = 0

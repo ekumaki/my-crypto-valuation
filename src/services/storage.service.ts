@@ -51,18 +51,14 @@ export class SecureStorageService {
       const { authService } = await import('./auth.service')
       
       if (googleAuthService.isAuthenticated.value) {
-        console.log('[DEBUG] Attempting to recover encryption key from Google auth...')
         const result = await authService.setupEncryptionFromGoogleAuth()
         if (result.success) {
-          console.log('[DEBUG] Encryption key recovered successfully')
           return true
         }
       }
       
-      console.log('[DEBUG] Encryption key recovery failed')
       return false
     } catch (error) {
-      console.error('[DEBUG] Encryption key recovery error:', error)
       return false
     }
   }
@@ -117,17 +113,13 @@ export class SecureStorageService {
   }
   
   async addHolding(holding: Omit<Holding, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> {
-    console.log('[DEBUG] SecureStorage.addHolding - starting with:', holding)
     
     if (!this.isUnlocked()) {
-      console.log('[DEBUG] SecureStorage.addHolding - storage is locked, attempting recovery')
       // 暗号化キーの自動復元を試行
       const recovered = await this.tryRecoverEncryptionKey()
       if (!recovered) {
-        console.error('[DEBUG] SecureStorage.addHolding - storage is locked and key recovery failed')
         throw new Error('暗号化ストレージがロックされており、キーの復元に失敗しました')
       }
-      console.log('[DEBUG] SecureStorage.addHolding - key recovery successful')
     }
     
     const now = Date.now()
@@ -138,26 +130,19 @@ export class SecureStorageService {
       updatedAt: now
     }
     
-    console.log('[DEBUG] SecureStorage.addHolding - created holding object:', newHolding)
     
     try {
-      console.log('[DEBUG] SecureStorage.addHolding - starting encryption')
       const encryptedHolding = await this.encryptHolding(newHolding)
-      console.log('[DEBUG] SecureStorage.addHolding - encryption successful')
       
       // Token should already exist from AddHoldingModal
       // ensureTokenExists is only a fallback and shouldn't overwrite existing token info
       // Commenting out to prevent overwriting token information
       // try {
       //   await dbServiceV2.ensureTokenExists(holding.symbol)
-      //   console.log('[DEBUG] SecureStorage.addHolding - token existence ensured for:', holding.symbol)
       // } catch (tokenError) {
-      //   console.warn('[DEBUG] SecureStorage.addHolding - token ensure failed (continuing):', tokenError)
       // }
       
-      console.log('[DEBUG] SecureStorage.addHolding - adding to database')
       await dbV2.table('holdings').add(encryptedHolding as any)
-      console.log('[DEBUG] SecureStorage.addHolding - successfully added to database')
       
       // Update last data modified timestamp for sync
       localStorage.setItem('lastDataModified', Date.now().toString())
@@ -176,9 +161,7 @@ export class SecureStorageService {
             version: 1
           }
           await metadataService.updateCacheForItem('holding', newHolding.id, metadata)
-          console.log('[DEBUG] SecureStorage.addHolding - metadata updated for new holding:', newHolding.id)
         } catch (error) {
-          console.warn('[DEBUG] SecureStorage.addHolding - failed to update metadata (but save succeeded):', error)
         }
       }, 10)
       
@@ -187,17 +170,13 @@ export class SecureStorageService {
         try {
           const { syncService } = await import('@/services/sync.service')
           syncService.triggerSyncOnDataChange().catch(syncError => {
-            console.warn('[DEBUG] SecureStorage.addHolding - failed to trigger sync on data change:', syncError)
           })
         } catch (error) {
-          console.warn('[DEBUG] SecureStorage.addHolding - failed to setup sync trigger:', error)
         }
       }, 50)
       
-      console.log('[DEBUG] SecureStorage.addHolding - operation completed successfully:', newHolding.id)
       return newHolding.id
     } catch (encryptionError) {
-      console.error('[DEBUG] SecureStorage.addHolding - encryption or save failed:', encryptionError)
       
       if (encryptionError instanceof Error) {
         if (encryptionError.message.includes('encrypt')) {
@@ -310,27 +289,20 @@ export class SecureStorageService {
       }
     }
     
-    console.log('[DEBUG] getHoldings - fetching from database...')
     const encryptedHoldings = await dbV2.table('holdings').orderBy('updatedAt').reverse().toArray()
-    console.log('[DEBUG] getHoldings - fetched', encryptedHoldings.length, 'raw holdings from database')
     
     const holdings: Holding[] = []
     for (let i = 0; i < encryptedHoldings.length; i++) {
       const encrypted = encryptedHoldings[i]
-      console.log('[DEBUG] getHoldings - processing holding', i, 'isEncrypted:', encrypted.isEncrypted)
       
       try {
         if (encrypted.isEncrypted) {
           const decrypted = await this.decryptHolding(encrypted as EncryptedHolding)
           holdings.push(decrypted)
-          console.log('[DEBUG] getHoldings - successfully decrypted holding', i)
         } else {
           holdings.push(encrypted as Holding)
-          console.log('[DEBUG] getHoldings - added unencrypted holding', i)
         }
       } catch (decryptError) {
-        console.error('[DEBUG] getHoldings - failed to decrypt holding', i, ':', decryptError)
-        console.error('[DEBUG] getHoldings - this is likely due to encryption key mismatch')
         
         // If decryption fails, it's likely due to key mismatch
         // For sync scenarios, we should clear the incompatible data
@@ -338,14 +310,11 @@ export class SecureStorageService {
       }
     }
     
-    console.log('[DEBUG] getHoldings - returning', holdings.length, 'processed holdings')
     return holdings
   }
 
   async clearIncompatibleEncryptedData(): Promise<void> {
-    console.log('[DEBUG] clearIncompatibleEncryptedData - clearing encrypted holdings...')
     await dbV2.holdings.clear()
-    console.log('[DEBUG] clearIncompatibleEncryptedData - encrypted holdings cleared')
   }
   
   async getHoldingsByLocation(locationId: string): Promise<Holding[]> {
@@ -452,59 +421,47 @@ export class SecureStorageService {
   async clearAllData(): Promise<void> {
     // データクリア時は暗号化キーの状態に関係なく実行
     // ログアウト時のクリーンアップを可能にする
-    console.log('[DEBUG] clearAllData - clearing database data...')
     await dbServiceV2.clearAllData()
-    console.log('[DEBUG] clearAllData - database data cleared successfully')
   }
   
   async clearAllDataForNewUser(): Promise<void> {
     // Clear only encrypted data for new user without checking unlock state
     // This is needed to remove old encrypted data that was encrypted with different keys
     // Keep locations and tokens data intact
-    console.log('[DEBUG] clearAllDataForNewUser - clearing encrypted holdings data...')
     await dbV2.holdings.clear()
     await dbV2.prices.clear()
-    console.log('[DEBUG] clearAllDataForNewUser - encrypted data cleared successfully')
     
     // Ensure initial data exists for new user
     await this.ensureInitialDataExists()
   }
 
   async ensureInitialDataExists(): Promise<void> {
-    console.log('[DEBUG] ensureInitialDataExists - ensuring preset data exists safely')
     try {
       const { metadataService } = await import('@/services/metadata.service')
       await metadataService.ensurePresetDataExists()
-      console.log('[DEBUG] ensureInitialDataExists - completed successfully')
     } catch (error) {
-      console.error('[DEBUG] ensureInitialDataExists - failed:', error)
     }
   }
   
   async getAuthState(): Promise<AuthState> {
     const authData = localStorage.getItem('crypto-portfolio-auth')
-    console.log('[DEBUG] getAuthState - raw localStorage data:', authData)
     if (!authData) {
       return { isAuthenticated: false }
     }
     
     try {
       const parsed = JSON.parse(authData)
-      console.log('[DEBUG] getAuthState - parsed data:', parsed)
       return parsed
     } catch (error) {
-      console.log('[DEBUG] getAuthState - parse error:', error)
       return { isAuthenticated: false }
     }
   }
   
   async setAuthState(state: AuthState): Promise<void> {
-    console.log('[DEBUG] setAuthState - setting state:', state)
     localStorage.setItem('crypto-portfolio-auth', JSON.stringify(state))
   }
   
   async clearAuthState(): Promise<void> {
-    console.log('[DEBUG] clearAuthState - starting cleanup...')
     localStorage.removeItem('crypto-portfolio-auth')
     
     // 認証状態クリア時は暗号化キーもクリア
@@ -512,7 +469,6 @@ export class SecureStorageService {
     
     // データベースクリア（ロック状態に関係なく）
     await this.clearAllData()
-    console.log('[DEBUG] clearAuthState - cleanup completed')
   }
 
   async forceReset(): Promise<void> {

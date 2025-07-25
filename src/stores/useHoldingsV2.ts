@@ -40,7 +40,6 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
   async function ensureStorageUnlocked(): Promise<boolean> {
     try {
       if (!secureStorage.isUnlocked()) {
-        console.log('[DEBUG] ensureStorageUnlocked - storage is locked, attempting auto unlock...')
         
         // Try to restore encryption key from session storage or local storage
         let keyData = sessionStorage.getItem('encryptionKey')
@@ -59,18 +58,15 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
             secureStorage.setEncryptionKey(cryptoKey)
             
             if (secureStorage.isUnlocked()) {
-              console.log(`[DEBUG] ensureStorageUnlocked - successfully auto-unlocked with ${keySource} key`)
               
               // セッションストレージにキーがない場合は保存
               if (keySource === 'local' && !sessionStorage.getItem('encryptionKey')) {
                 sessionStorage.setItem('encryptionKey', keyData)
-                console.log('[DEBUG] ensureStorageUnlocked - restored key to session storage')
               }
               
               return true
             }
           } catch (keyError) {
-            console.error(`[DEBUG] ensureStorageUnlocked - failed to import key from ${keySource} storage:`, keyError)
             // Remove invalid key
             if (keySource === 'session') {
               sessionStorage.removeItem('encryptionKey')
@@ -81,7 +77,6 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
         }
         
         // If auto unlock failed, request unlock from user
-        console.log('[DEBUG] ensureStorageUnlocked - auto unlock failed, requesting user unlock...')
         const { useSessionStore } = await import('@/stores/session.store')
         const sessionStore = useSessionStore()
         
@@ -91,7 +86,6 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
       
       return true
     } catch (error) {
-      console.error('[DEBUG] ensureStorageUnlocked - error:', error)
       return false
     }
   }
@@ -106,20 +100,16 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
       if (syncEnabled) {
         // 同期が有効な場合は暗号化されたストレージを使用
         if (!secureStorage.isUnlocked()) {
-          console.log('[DEBUG] loadHoldings - sync enabled but storage is locked, skipping load')
           holdings.value = []
           return
         }
         
-        console.log('[DEBUG] loadHoldings - loading from secure storage (sync enabled)')
         holdings.value = await secureStorage.getHoldings()
       } else {
         // 同期が無効な場合は直接DBから読み込み
-        console.log('[DEBUG] loadHoldings - loading from DB directly (sync disabled)')
         holdings.value = await dbServiceV2.getHoldings()
       }
       
-      console.log('[DEBUG] loadHoldings - successfully loaded', holdings.value.length, 'holdings')
     } catch (err) {
       error.value = 'ポートフォリオの読み込みに失敗しました'
       console.error('Failed to load holdings:', err)
@@ -138,20 +128,16 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
       if (syncEnabled) {
         // 同期が有効な場合は暗号化されたストレージを使用
         if (!secureStorage.isUnlocked()) {
-          console.log('[DEBUG] loadAggregatedHoldings - sync enabled but storage is locked, skipping load')
           aggregatedHoldings.value = new Map()
           return
         }
         
-        console.log('[DEBUG] loadAggregatedHoldings - loading from secure storage (sync enabled)')
         aggregatedHoldings.value = await secureStorage.getAggregatedHoldings()
       } else {
         // 同期が無効な場合は直接DBから読み込み
-        console.log('[DEBUG] loadAggregatedHoldings - loading from DB directly (sync disabled)')
         aggregatedHoldings.value = await dbServiceV2.getAggregatedHoldings()
       }
       
-      console.log('[DEBUG] loadAggregatedHoldings - successfully loaded', aggregatedHoldings.value.size, 'aggregated holdings')
     } catch (err) {
       error.value = 'ポートフォリオの読み込みに失敗しました'
       console.error('Failed to load aggregated holdings:', err)
@@ -165,8 +151,6 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
       error.value = null
       const syncEnabled = await isSyncEnabled()
       
-      console.log('[DEBUG] addHolding - sync enabled:', syncEnabled)
-      console.log('[DEBUG] addHolding - attempting to add:', holding)
       
       let savedId: string | number | null = null
       
@@ -179,19 +163,14 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
           }
           
           savedId = await secureStorage.addHolding(holding)
-          console.log('[DEBUG] addHolding - successfully added to secure storage, ID:', savedId)
         } catch (secureError) {
-          console.error('[DEBUG] addHolding - secure storage failed:', secureError)
           throw new Error(`暗号化ストレージへの保存に失敗しました: ${secureError instanceof Error ? secureError.message : String(secureError)}`)
         }
       } else {
         // 同期が無効な場合は直接DBに保存
         try {
-          console.log('[DEBUG] addHolding - adding to DB directly (sync disabled)')
           savedId = await dbServiceV2.addHolding(holding)
-          console.log('[DEBUG] addHolding - successfully added to DB, ID:', savedId)
         } catch (dbError) {
-          console.error('[DEBUG] addHolding - DB save failed:', dbError)
           throw new Error(`データベースへの保存に失敗しました: ${dbError instanceof Error ? dbError.message : String(dbError)}`)
         }
       }
@@ -206,9 +185,7 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
           loadHoldings(),
           loadAggregatedHoldings()
         ])
-        console.log('[DEBUG] addHolding - completed reload')
       } catch (reloadError) {
-        console.warn('[DEBUG] addHolding - reload failed but save succeeded:', reloadError)
         // リロード失敗はワーニングとして扱い、処理は継続
       }
       
@@ -216,7 +193,6 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
       try {
         await processHoldingMetadata(savedId.toString(), syncEnabled, holding.symbol)
       } catch (metaError) {
-        console.warn('[DEBUG] addHolding - metadata processing failed (but save succeeded):', metaError)
       }
       
       // 自動同期（非同期で実行、エラーでも保存処理は成功とする）
@@ -226,29 +202,23 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
           try {
             const { syncService } = await import('@/services/sync.service')
             if (syncService.isEnabled.value) {
-              console.log('[DEBUG] addHolding - triggering automatic sync')
               const result = await syncService.performSync({ skipConflictDetection: true })
               if (result.success) {
-                console.log('[DEBUG] addHolding - automatic sync completed successfully')
               } else {
-                console.warn('[DEBUG] addHolding - automatic sync failed:', result.message)
                 if (window.showToast) {
                   window.showToast.warning('同期エラー', `データの自動同期に失敗しました: ${result.message}`)
                 }
               }
             }
           } catch (syncError) {
-            console.warn('[DEBUG] addHolding - sync failed (but save succeeded):', syncError)
           }
         }, 100)
       }
       
-      console.log('[DEBUG] addHolding - operation completed successfully')
       return true
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : '保有データの追加に失敗しました'
       error.value = errorMessage
-      console.error('[DEBUG] addHolding - operation failed:', err)
       return false
     }
   }
@@ -259,7 +229,6 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
       const { metadataService } = await import('@/services/metadata.service')
       const now = new Date()
       
-      console.log('[DEBUG] processHoldingMetadata - starting for ID:', holdingId, 'symbol:', symbol, 'syncEnabled:', syncEnabled)
       
       // 保有データのメタデータを設定
       const holdingMetadata = {
@@ -274,9 +243,7 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
       
       try {
         await metadataService.updateCacheForItem('holding', holdingId, holdingMetadata)
-        console.log('[DEBUG] processHoldingMetadata - holding metadata updated for ID:', holdingId)
       } catch (holdingMetaError) {
-        console.warn('[DEBUG] processHoldingMetadata - holding metadata update failed:', holdingMetaError)
       }
       
       // トークンのメタデータ処理（失敗しても継続）
@@ -285,7 +252,6 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
         const token = await dbV2.tokens.where('symbol').equals(symbol).first()
         
         if (token) {
-          console.log('[DEBUG] processHoldingMetadata - found token for symbol:', symbol)
           
           const tokenMetadata = {
             isNew: false,
@@ -299,23 +265,17 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
           
           // シンボルでメタデータを更新
           await metadataService.updateCacheForItem('token', symbol, tokenMetadata)
-          console.log('[DEBUG] processHoldingMetadata - token metadata updated for symbol:', symbol)
           
           // IDでもメタデータを更新（念のため）
           if (token.id) {
             await metadataService.updateCacheForItem('token', token.id, tokenMetadata)
-            console.log('[DEBUG] processHoldingMetadata - token metadata updated for ID:', token.id)
           }
         } else {
-          console.log('[DEBUG] processHoldingMetadata - token not found for symbol:', symbol)
         }
       } catch (tokenError) {
-        console.warn('[DEBUG] processHoldingMetadata - token metadata processing failed (continuing):', tokenError)
       }
       
-      console.log('[DEBUG] processHoldingMetadata - completed successfully')
     } catch (error) {
-      console.error('[DEBUG] processHoldingMetadata - failed:', error)
       throw error
     }
   }
@@ -366,39 +326,31 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
         }
         
         await metadataService.updateCacheForItem('holding', id, holdingMetadata)
-        console.log('[DEBUG] updateHolding - metadata updated for ID:', id)
         
         // 自動同期を実行（同期有効な場合のみ）
         if (syncEnabled) {
           if (syncService.isEnabled.value) {
-            console.log('[DEBUG] updateHolding - triggering automatic sync')
             syncService.performSync({ skipConflictDetection: true }).then(result => {
               if (result.success) {
-                console.log('[DEBUG] updateHolding - automatic sync completed successfully')
                 // 同期完了後、未同期件数の更新を確実にするため少し待機
                 setTimeout(() => {
-                  console.log('[DEBUG] updateHolding - sync complete, events should have fired')
                 }, 200)
               } else {
-                console.warn('[DEBUG] updateHolding - automatic sync failed:', result.message)
                 // Show error toast for sync failures
                 if (window.showToast) {
                   window.showToast.warning('同期エラー', `データの自動同期に失敗しました: ${result.message}`)
                 }
               }
             }).catch(err => {
-              console.error('[DEBUG] updateHolding - automatic sync error:', err)
               // Show error toast for sync errors
               if (window.showToast) {
                 window.showToast.error('同期エラー', 'データの自動同期中にエラーが発生しました')
               }
             })
           } else {
-            console.log('[DEBUG] updateHolding - sync not enabled, skipping automatic sync')
           }
         }
       } catch (metaError) {
-        console.warn('[DEBUG] updateHolding - metadata/sync processing failed:', metaError)
         // Don't fail the whole operation if metadata/sync fails
       }
       
@@ -456,39 +408,31 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
         }
         
         await metadataService.updateCacheForItem('holding', id, holdingMetadata)
-        console.log('[DEBUG] deleteHolding - metadata updated for ID:', id)
         
         // 自動同期を実行（同期有効な場合のみ）
         if (syncEnabled) {
           if (syncService.isEnabled.value) {
-            console.log('[DEBUG] deleteHolding - triggering automatic sync')
             syncService.performSync({ skipConflictDetection: true }).then(result => {
               if (result.success) {
-                console.log('[DEBUG] deleteHolding - automatic sync completed successfully')
                 // 同期完了後、未同期件数の更新を確実にするため少し待機
                 setTimeout(() => {
-                  console.log('[DEBUG] deleteHolding - sync complete, events should have fired')
                 }, 200)
               } else {
-                console.warn('[DEBUG] deleteHolding - automatic sync failed:', result.message)
                 // Show error toast for sync failures
                 if (window.showToast) {
                   window.showToast.warning('同期エラー', `データの自動同期に失敗しました: ${result.message}`)
                 }
               }
             }).catch(err => {
-              console.error('[DEBUG] deleteHolding - automatic sync error:', err)
               // Show error toast for sync errors
               if (window.showToast) {
                 window.showToast.error('同期エラー', 'データの自動同期中にエラーが発生しました')
               }
             })
           } else {
-            console.log('[DEBUG] deleteHolding - sync not enabled or no cloud password, skipping automatic sync')
           }
         }
       } catch (metaError) {
-        console.warn('[DEBUG] deleteHolding - metadata/sync processing failed:', metaError)
         // Don't fail the whole operation if metadata/sync fails
       }
       

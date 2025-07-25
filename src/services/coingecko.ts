@@ -108,16 +108,12 @@ class CoinGeckoService {
     if (!query.trim()) return []
     
     try {
-      console.log('[DEBUG] CoinGecko.searchTokens - searching for:', query)
       const data = await this.fetchAPI<CoinGeckoSearchResult>(`/search?query=${encodeURIComponent(query)}`)
-      console.log('[DEBUG] CoinGecko.searchTokens - found', data.coins.length, 'tokens')
       return data.coins.slice(0, 10) // Limit to 10 results
     } catch (error) {
-      console.error('[DEBUG] CoinGecko.searchTokens - search failed:', error)
       
       // ネットワークエラーの場合はより詳細なログを出力
       if (error instanceof TypeError && error.message === 'Failed to fetch') {
-        console.error('[DEBUG] CoinGecko.searchTokens - network error, check proxy configuration')
       }
       
       return []

@@ -472,16 +472,13 @@ async function performManualSync() {
 async function handleDeleteUnsyncedData() {
   try {
     isDeletingUnsyncedData.value = true
-    console.log('[DEBUG] SyncSettings.handleDeleteUnsyncedData - starting bulk delete')
     
     // メタデータサービスから未同期データの詳細を取得
     const { metadataService } = await import('@/services/metadata.service')
     const unsyncedDetails = await metadataService.getUnsyncedDataDetails(syncStatus.value.isEnabled)
     
-    console.log('[DEBUG] SyncSettings.handleDeleteUnsyncedData - found unsynced items:', unsyncedDetails.length)
     
     if (unsyncedDetails.length === 0) {
-      console.log('[DEBUG] SyncSettings.handleDeleteUnsyncedData - no unsynced data found')
       showDeleteConfirmModal.value = false
       return
     }
@@ -493,7 +490,6 @@ async function handleDeleteUnsyncedData() {
     
     for (const item of unsyncedDetails) {
       try {
-        console.log('[DEBUG] SyncSettings.handleDeleteUnsyncedData - deleting:', item.type, item.id)
         
         switch (item.type) {
           case 'holding':
@@ -517,7 +513,6 @@ async function handleDeleteUnsyncedData() {
         
         deletedCount++
       } catch (error) {
-        console.error('[DEBUG] SyncSettings.handleDeleteUnsyncedData - failed to delete item:', item, error)
       }
     }
     
@@ -527,7 +522,6 @@ async function handleDeleteUnsyncedData() {
     // ストアを更新
     await refreshStores()
     
-    console.log('[DEBUG] SyncSettings.handleDeleteUnsyncedData - completed, deleted:', deletedCount, 'items')
     
     // 成功メッセージを表示
     if (window.showToast) {
@@ -536,7 +530,6 @@ async function handleDeleteUnsyncedData() {
     
     showDeleteConfirmModal.value = false
   } catch (error) {
-    console.error('[DEBUG] SyncSettings.handleDeleteUnsyncedData - error:', error)
     
     if (window.showToast) {
       window.showToast.error('削除エラー', '未同期データの削除中にエラーが発生しました')
@@ -578,10 +571,8 @@ function formatLastSyncTime(timestamp: number): string {
 
 async function updateUnsyncedDataCount() {
   try {
-    console.log('[DEBUG] SyncSettings.updateUnsyncedDataCount - starting update, sync enabled:', syncStatus.value.isEnabled)
     const { metadataService } = await import('@/services/metadata.service')
     unsyncedDataCount.value = await metadataService.getUnsyncedDataCount(syncStatus.value.isEnabled)
-    console.log('[DEBUG] SyncSettings.updateUnsyncedDataCount - updated count:', unsyncedDataCount.value)
   } catch (error) {
     console.warn('Failed to update unsynced data count:', error)
   }

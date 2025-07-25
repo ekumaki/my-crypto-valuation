@@ -19,13 +19,11 @@ export const useTokensStore = defineStore('tokens', () => {
       isLoading.value = true
       error.value = null
       tokens.value = await dbV2.tokens.toArray()
-      console.log('[DEBUG] loadTokens - loaded tokens:', tokens.value.length, 'tokens')
       
       // Log custom tokens (non-preset)
       const presetSymbols = ['BTC', 'ETH', 'BNB', 'ADA', 'SOL', 'XRP', 'DOT', 'DOGE', 'AVAX', 'SHIB', 'MATIC', 'LTC', 'ATOM', 'LINK', 'UNI']
       const customTokens = tokens.value.filter(t => !presetSymbols.includes(t.symbol))
       if (customTokens.length > 0) {
-        console.log('[DEBUG] loadTokens - custom tokens found:', customTokens)
       }
       
       // アイコンが不足しているトークンがある場合は修復を実行
@@ -47,12 +45,10 @@ export const useTokensStore = defineStore('tokens', () => {
   async function addToken(tokenData: { id: string; symbol: string; name: string; iconUrl?: string }) {
     try {
       error.value = null
-      console.log('[DEBUG] addToken - attempting to add token:', tokenData)
       
       // Check if token already exists
       const existingToken = await dbV2.tokens.where('symbol').equals(tokenData.symbol.toUpperCase()).first()
       if (existingToken) {
-        console.log('[DEBUG] addToken - token already exists:', existingToken)
         return true
       }
       
@@ -64,10 +60,8 @@ export const useTokensStore = defineStore('tokens', () => {
         isCustom: true  // User-added tokens are always custom
       }
 
-      console.log('[DEBUG] addToken - adding token to database:', token)
       await dbServiceV2.addToken(token)
       
-      console.log('[DEBUG] addToken - reloading tokens')
       await loadTokens()
       
       // データ変更時の自動同期をトリガー（非同期で実行）
@@ -80,7 +74,6 @@ export const useTokensStore = defineStore('tokens', () => {
         console.warn('Failed to setup sync trigger on token add:', error)
       }
       
-      console.log('[DEBUG] addToken - token added successfully')
       return true
     } catch (err) {
       error.value = 'トークンの追加に失敗しました'

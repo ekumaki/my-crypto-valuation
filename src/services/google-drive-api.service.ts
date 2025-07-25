@@ -257,15 +257,12 @@ class GoogleDriveApiService {
 
   async deleteFile(fileId: string): Promise<void> {
     try {
-      console.log('[GDAPI] Attempting to delete file with ID:', fileId)
       
       const response = await this.makeApiRequest(
         'DELETE',
         `https://www.googleapis.com/drive/v3/files/${fileId}`
       )
       
-      console.log('[GDAPI] Delete API response:', response)
-      console.log('[GDAPI] File deleted successfully:', fileId)
     } catch (error) {
       console.error('[GDAPI] Failed to delete file:', fileId, error)
       throw new Error('ファイルの削除に失敗しました')
@@ -275,25 +272,18 @@ class GoogleDriveApiService {
   async findBackupFile(): Promise<DriveFile | null> {
     try {
       const appFolderId = await this.getOrCreateAppFolder()
-      console.log('[GDAPI] Searching for backup file in folder:', appFolderId)
-      console.log('[GDAPI] Looking for file named:', GOOGLE_DRIVE_CONFIG.backupFileName)
       
       const query = `name='${GOOGLE_DRIVE_CONFIG.backupFileName}' and '${appFolderId}' in parents and trashed=false`
-      console.log('[GDAPI] Search query:', query)
       
       const response = await this.makeApiRequest(
         'GET',
         `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name,mimeType,modifiedTime,size,parents)&orderBy=modifiedTime desc`
       )
 
-      console.log('[GDAPI] Search response:', response)
-      console.log('[GDAPI] Files found:', response.files?.length || 0)
       
       if (response.files && response.files.length > 0) {
-        console.log('[GDAPI] Backup file found:', response.files[0])
         return response.files[0]
       } else {
-        console.log('[GDAPI] No backup file found')
         return null
       }
     } catch (error) {

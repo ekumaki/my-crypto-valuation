@@ -51,7 +51,6 @@ const router = createRouter({
 })
 
 router.beforeEach(async (to, from, next) => {
-  console.log('[DEBUG] Router guard - navigating to:', to.path)
   
   const requiresAuth = to.meta.requiresAuth !== false
   let isAuthenticated = false
@@ -59,20 +58,15 @@ router.beforeEach(async (to, from, next) => {
   try {
     isAuthenticated = await authService.isAuthenticated()
   } catch (error) {
-    console.error('[DEBUG] Router guard - auth check failed:', error)
     isAuthenticated = false
   }
   
-  console.log('[DEBUG] Router guard - requiresAuth:', requiresAuth, 'isAuthenticated:', isAuthenticated)
   
   if (requiresAuth && !isAuthenticated) {
-    console.log('[DEBUG] Router guard - redirecting to /login')
     next('/login')
   } else if (to.name === 'login' && isAuthenticated) {
-    console.log('[DEBUG] Router guard - redirecting to /summary')
     next('/summary')
   } else {
-    console.log('[DEBUG] Router guard - allowing navigation')
     next()
   }
 })

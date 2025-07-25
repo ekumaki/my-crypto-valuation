@@ -16,7 +16,6 @@ class MetadataService {
 
   private performInitialCleanup() {
     try {
-      console.log('[DEBUG] MetadataService - performing initial cleanup')
       
       // 無効なメタデータキャッシュをクリア
       this.clearCache()
@@ -28,15 +27,12 @@ class MetadataService {
         
         // 1年以上古い、または未来の同期時刻をクリア
         if (timeDiff > 365 * 24 * 60 * 60 * 1000 || this.globalSyncTime > now) {
-          console.log('[DEBUG] MetadataService - clearing invalid globalSyncTime:', this.globalSyncTime)
           localStorage.removeItem('globalSyncTime')
           this.globalSyncTime = null
         }
       }
       
-      console.log('[DEBUG] MetadataService - initial cleanup completed')
     } catch (error) {
-      console.warn('[DEBUG] MetadataService - initial cleanup failed:', error)
     }
   }
 
@@ -170,11 +166,9 @@ class MetadataService {
    * Public method to clear cache - for external use
    */
   clearMetadataCache(): void {
-    console.log('[DEBUG] clearMetadataCache - clearing all cached metadata')
     this.clearCache()
     // 強制的にキャッシュを無効化
     this.cacheExpiry = null
-    console.log('[DEBUG] clearMetadataCache - cache cleared and invalidated')
   }
 
   /**
@@ -196,21 +190,18 @@ class MetadataService {
    * Get unsynced data count with caching
    */
   async getUnsyncedDataCount(syncEnabled: boolean = true): Promise<UnsyncedDataCount> {
-    console.log('[DEBUG] getUnsyncedDataCount - called with syncEnabled:', syncEnabled, 'globalSyncTime:', this.globalSyncTime)
     
     if (this.isCacheValid()) {
       const cached = this.getCachedCount()
-      console.log('[DEBUG] getUnsyncedDataCount - returning cached result:', cached)
       return cached
     }
 
-    console.log('[DEBUG] getUnsyncedDataCount - cache miss, calculating fresh count')
     
     const holdings = await dbV2.holdings.toArray()
     const locations = await dbV2.locations.toArray()
     const tokens = await dbV2.tokens.toArray()
 
-    console.log('[DEBUG] getUnsyncedDataCount - data loaded:', {
+    return Promise.resolve({
       holdingsCount: holdings.length,
       locationsCount: locations.length,
       tokensCount: tokens.length
@@ -251,7 +242,6 @@ class MetadataService {
       total: holdingCount + locationCount + tokenCount
     }
 
-    console.log('[DEBUG] getUnsyncedDataCount - final result:', result)
 
     // Cache the result
     this.cacheResult(result)
@@ -441,9 +431,7 @@ class MetadataService {
           await dbV2.tokens.update(id, { metadata })
           break
       }
-      console.log('[DEBUG] updateCacheForItem - persisted metadata for:', type, id)
     } catch (error) {
-      console.warn('[DEBUG] updateCacheForItem - failed to persist metadata:', error)
     }
     
     // Clear count cache to force refresh
@@ -454,7 +442,6 @@ class MetadataService {
    * Mark all current data as synced
    */
   async markAllAsSynced(): Promise<void> {
-    console.log('[DEBUG] markAllAsSynced - starting to mark all data as synced')
     
     try {
       // キャッシュを事前にクリアして最新データを確実に取得
@@ -467,7 +454,6 @@ class MetadataService {
 
       // 保有している仮想通貨のシンボルを収集
       const holdingSymbols = new Set(holdings.map(h => h.symbol))
-      console.log('[DEBUG] markAllAsSynced - holding symbols:', Array.from(holdingSymbols))
 
       // Mark holdings as synced
       for (const holding of holdings) {
@@ -506,7 +492,6 @@ class MetadataService {
         
         // 保有している仮想通貨のトークンは特別に処理
         if (holdingSymbols.has(token.symbol)) {
-          console.log('[DEBUG] markAllAsSynced - marking used token as synced:', token.symbol)
           // シンボルとIDの両方でキャッシュを更新
           await this.updateCacheForItem('token', token.symbol, syncedMetadata)
           if (token.id) {
@@ -519,7 +504,6 @@ class MetadataService {
       for (const symbol of holdingSymbols) {
         const token = tokens.find(t => t.symbol === symbol)
         if (token) {
-          console.log('[DEBUG] markAllAsSynced - ensuring token is synced:', symbol)
           const syncedMetadata = {
             isNew: false,
             isModified: false,
@@ -548,9 +532,7 @@ class MetadataService {
       // 再度キャッシュをクリアして確実に最新状態を反映
       this.clearCache()
       
-      console.log('[DEBUG] markAllAsSynced - completed successfully, all cache cleared')
     } catch (error) {
-      console.error('[DEBUG] markAllAsSynced - error:', error)
       throw error
     }
   }
@@ -560,7 +542,6 @@ class MetadataService {
    * Clean up legacy metadata without affecting user data
    */
   async cleanupLegacyMetadata(): Promise<void> {
-    console.log('[DEBUG] cleanupLegacyMetadata - cleaning up legacy metadata only')
 
     // Clear all cached metadata
     this.clearCache()
@@ -575,7 +556,6 @@ class MetadataService {
     }
     keysToRemove.forEach(key => localStorage.removeItem(key))
 
-    console.log('[DEBUG] cleanupLegacyMetadata - removed', keysToRemove.length, 'legacy keys')
   }
 
   /**
@@ -583,7 +563,6 @@ class MetadataService {
    * WARNING: This will delete all custom tokens and locations!
    */
   async forceResetAllMetadata(): Promise<void> {
-    console.log('[DEBUG] forceResetAllMetadata - clearing all metadata and repopulating initial data')
 
     // Clear all cached metadata
     this.clearCache()
@@ -600,7 +579,6 @@ class MetadataService {
 
     // Preserve custom tokens before clearing
     const customTokens = await this.getCustomTokens()
-    console.log(`[DEBUG] forceResetAllMetadata - preserving ${customTokens.length} custom tokens:`, customTokens.map(t => t.symbol))
     
     // Clear existing tables
     await dbV2.locations.clear()
@@ -674,7 +652,6 @@ class MetadataService {
 
     // Restore custom tokens that were preserved
     if (customTokens.length > 0) {
-      console.log(`[DEBUG] forceResetAllMetadata - restoring ${customTokens.length} custom tokens`)
       // Ensure custom tokens are marked as custom
       const customTokensWithFlag = customTokens.map(token => ({
         ...token,
@@ -699,13 +676,11 @@ class MetadataService {
       for (const token of customTokens) {
         await this.updateCacheForItem('token', token.symbol, createCustomTokenMetadata())
       }
-      console.log('[DEBUG] forceResetAllMetadata - custom tokens restored successfully')
     }
 
     // Set the global sync time to ensure everything is marked as synced
     this.setGlobalSyncTime(new Date())
 
-    console.log('[DEBUG] forceResetAllMetadata - completed successfully')
   }
 
   /**
@@ -713,7 +688,6 @@ class MetadataService {
    * This is the recommended method for normal app initialization
    */
   async ensurePresetDataExists(): Promise<void> {
-    console.log('[DEBUG] ensurePresetDataExists - ensuring preset data exists without clearing custom data')
     
     const createInitialMetadata = () => {
       const now = new Date()
@@ -772,7 +746,6 @@ class MetadataService {
     for (const location of presetLocations) {
       const exists = await dbV2.locations.get(location.id)
       if (!exists) {
-        console.log(`[DEBUG] ensurePresetDataExists - adding missing preset location: ${location.id}`)
         await dbV2.locations.put(location)
         await this.updateCacheForItem('location', location.id, createInitialMetadata())
       }
@@ -782,13 +755,11 @@ class MetadataService {
     for (const token of presetTokens) {
       const exists = await dbV2.tokens.get(token.symbol)
       if (!exists) {
-        console.log(`[DEBUG] ensurePresetDataExists - adding missing preset token: ${token.symbol}`)
         await dbV2.tokens.put(token)
         await this.updateCacheForItem('token', token.symbol, createInitialMetadata())
       }
     }
 
-    console.log('[DEBUG] ensurePresetDataExists - completed successfully')
   }
 
   /**
@@ -806,10 +777,8 @@ class MetadataService {
     try {
       const allTokens = await dbV2.tokens.toArray()
       const customTokens = allTokens.filter(token => !this.isPresetToken(token.symbol))
-      console.log(`[DEBUG] getCustomTokens - found ${customTokens.length} custom tokens:`, customTokens.map(t => t.symbol))
       return customTokens
     } catch (error) {
-      console.error('[DEBUG] getCustomTokens - failed:', error)
       return []
     }
   }
@@ -822,10 +791,8 @@ class MetadataService {
       const token = await dbV2.tokens.get(symbol.toUpperCase())
       if (token && !this.isPresetToken(token.symbol)) {
         await dbV2.tokens.update(symbol.toUpperCase(), { isCustom: true })
-        console.log(`[DEBUG] markTokenAsCustom - marked ${symbol} as custom`)
       }
     } catch (error) {
-      console.error(`[DEBUG] markTokenAsCustom - failed for ${symbol}:`, error)
     }
   }
 
@@ -834,23 +801,18 @@ class MetadataService {
    */
   async ensureCustomTokensMarked(): Promise<void> {
     try {
-      console.log('[DEBUG] ensureCustomTokensMarked - checking all tokens')
       const allTokens = await dbV2.tokens.toArray()
       
       for (const token of allTokens) {
         const shouldBeCustom = !this.isPresetToken(token.symbol)
         if (shouldBeCustom && !token.isCustom) {
           await dbV2.tokens.update(token.symbol, { isCustom: true })
-          console.log(`[DEBUG] ensureCustomTokensMarked - marked ${token.symbol} as custom`)
         } else if (!shouldBeCustom && token.isCustom) {
           await dbV2.tokens.update(token.symbol, { isCustom: false })
-          console.log(`[DEBUG] ensureCustomTokensMarked - marked ${token.symbol} as preset`)
         }
       }
       
-      console.log('[DEBUG] ensureCustomTokensMarked - completed')
     } catch (error) {
-      console.error('[DEBUG] ensureCustomTokensMarked - failed:', error)
     }
   }
 
@@ -859,7 +821,6 @@ class MetadataService {
    * Usage: window.clearLegacyData()
    */
   async debugClearAllLegacyData(): Promise<void> {
-    console.log('[DEBUG] Manual legacy data cleanup started')
     
     // Remove the completion flag first
     localStorage.removeItem('legacyDataResetCompleted')
@@ -881,13 +842,11 @@ class MetadataService {
       key.startsWith('token_')
     )
     
-    console.log('[DEBUG] Manual cleanup - removing keys:', keysToRemove)
     keysToRemove.forEach(key => localStorage.removeItem(key))
     
     // Force reset
     await this.forceResetAllMetadata()
     
-    console.log('[DEBUG] Manual legacy data cleanup completed')
     alert('レガシーデータの削除が完了しました。ページを再読み込みしてください。')
   }
 }
@@ -897,5 +856,4 @@ export const metadataService = new MetadataService()
 // Debug function for browser console
 if (typeof window !== 'undefined') {
   (window as any).clearLegacyData = () => metadataService.debugClearAllLegacyData()
-  console.log('[DEBUG] window.clearLegacyData() function available for manual legacy data cleanup')
 } 

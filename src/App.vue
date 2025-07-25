@@ -131,11 +131,9 @@ const showSyncSettings = ref(false)
 
 // Watch for authentication state changes
 watch(() => sessionStore.isAuthenticated, (newValue, oldValue) => {
-  console.log('[DEBUG] sessionStore.isAuthenticated changed:', oldValue, '->', newValue)
   
   // If authentication state changed from false to true, navigate to summary
   if (oldValue === false && newValue === true) {
-    console.log('[DEBUG] Authentication state changed to true, navigating to /edit')
     router.push('/edit')
   }
 })
@@ -153,15 +151,11 @@ function toggleDarkMode() {
 
 async function handleLoginSuccess() {
   // Session is already started in LoginForm, just navigate to summary
-  console.log('[DEBUG] handleLoginSuccess called - sessionStore.isAuthenticated:', sessionStore.isAuthenticated)
   
   // セッション状態の更新を待つ
   await new Promise(resolve => setTimeout(resolve, 100))
   
-  console.log('[DEBUG] After wait - sessionStore.isAuthenticated:', sessionStore.isAuthenticated)
-  console.log('[DEBUG] About to navigate to /edit')
   router.push('/edit')
-  console.log('[DEBUG] Navigation to /edit completed')
 }
 
 
@@ -185,22 +179,18 @@ onMounted(async () => {
   // Initialize session - but don't wait for it to complete
   // This prevents blocking the UI while allowing the session to be restored
   sessionStore.initialize().then(() => {
-    console.log('[DEBUG] App.vue sessionStore.initialize completed - sessionStore.isAuthenticated:', sessionStore.isAuthenticated)
   })
   
   // Initialize preset data and clean up legacy metadata on app startup
   try {
     import('@/services/metadata.service').then(({ metadataService }) => {
-      console.log('[DEBUG] App.vue - initializing preset data and cleaning legacy metadata')
       
       // First, ensure preset data exists (without deleting custom data)
       metadataService.ensurePresetDataExists().then(() => {
-        console.log('[DEBUG] App.vue - preset data initialized')
         
         // Then clean up legacy metadata
         return metadataService.cleanupLegacyMetadata()
       }).then(() => {
-        console.log('[DEBUG] App.vue - legacy metadata cleaned up')
         
         // Additional cleanup of localStorage - more targeted approach
         const keysToRemove: string[] = []
@@ -228,24 +218,19 @@ onMounted(async () => {
         
         keysToRemove.forEach(key => {
           localStorage.removeItem(key)
-          console.log('[DEBUG] App.vue - removed legacy key:', key)
         })
         
         if (keysToRemove.length > 0) {
-          console.log('[DEBUG] App.vue - additional cleanup removed', keysToRemove.length, 'legacy keys')
         }
         
         // Force a complete refresh of unsynced data count
         setTimeout(() => {
-          console.log('[DEBUG] App.vue - forcing unsynced data count refresh')
         }, 1000)
         
       }).catch(error => {
-        console.warn('[DEBUG] App.vue - failed to initialize or clean up:', error)
       })
     })
   } catch (error) {
-    console.warn('[DEBUG] App.vue - failed to import metadata service:', error)
   }
 })
 </script>

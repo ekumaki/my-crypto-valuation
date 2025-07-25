@@ -88,7 +88,6 @@ class MetadataServiceAdapter {
     this.globalSyncTime = time
     try {
       localStorage.setItem('globalSyncTime', time.toISOString())
-      console.log('[Metadata] Global sync time set:', time)
     } catch (error) {
       console.error('[Metadata] Failed to save global sync time:', error)
     }
@@ -98,7 +97,6 @@ class MetadataServiceAdapter {
     this.globalSyncTime = null
     try {
       localStorage.removeItem('globalSyncTime')
-      console.log('[Metadata] Global sync time cleared')
     } catch (error) {
       console.error('[Metadata] Failed to clear global sync time:', error)
     }
@@ -109,7 +107,6 @@ class MetadataServiceAdapter {
       const saved = localStorage.getItem('globalSyncTime')
       if (saved) {
         this.globalSyncTime = new Date(saved)
-        console.log('[Metadata] Global sync time loaded:', this.globalSyncTime)
       }
     } catch (error) {
       console.error('[Metadata] Failed to load global sync time:', error)
@@ -119,7 +116,6 @@ class MetadataServiceAdapter {
 
   private performInitialCleanup(): void {
     try {
-      console.log('[Metadata] Performing initial cleanup')
       
       // キャッシュをクリア
       metadataCacheService.clearCache()
@@ -131,12 +127,10 @@ class MetadataServiceAdapter {
         
         // 1年以上古い、または未来の同期時刻をクリア
         if (timeDiff > 365 * 24 * 60 * 60 * 1000 || this.globalSyncTime > now) {
-          console.log('[Metadata] Clearing invalid globalSyncTime:', this.globalSyncTime)
           this.clearGlobalSyncTime()
         }
       }
       
-      console.log('[Metadata] Initial cleanup completed')
     } catch (error) {
       console.warn('[Metadata] Initial cleanup failed:', error)
     }

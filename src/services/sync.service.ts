@@ -125,25 +125,20 @@ class SyncService {
   private emitSyncComplete() {
     // メタデータ更新とキャッシュ再構築の完了を確実にするために待機
     setTimeout(async () => {
-      console.log('[DEBUG] emitSyncComplete - waiting for metadata update completion')
       
       // メタデータキャッシュを明示的にクリア
       try {
         const { metadataService } = await import('@/services/metadata.service')
         metadataService.clearMetadataCache()
-        console.log('[DEBUG] emitSyncComplete - metadata cache cleared')
         
         // さらに待機してデータベース書き込みの完了を確実にする
         await new Promise(resolve => setTimeout(resolve, 200))
         
         // 最終的な未同期件数を確認
         const finalCount = await metadataService.getUnsyncedDataCount(true)
-        console.log('[DEBUG] emitSyncComplete - final unsynced count after cache clear:', finalCount)
       } catch (error) {
-        console.error('[DEBUG] emitSyncComplete - failed to clear cache or get final count:', error)
       }
       
-      console.log('[DEBUG] emitSyncComplete - firing sync complete event')
       this.eventEmitter.emit('syncComplete')
     }, 500)  // 300msから500msに延長
   }
@@ -151,7 +146,6 @@ class SyncService {
   private emitConflictResolved() {
     // メタデータ更新の完了を確実にするために少し待機
     setTimeout(() => {
-      console.log('[DEBUG] emitConflictResolved - firing conflict resolved event')
       this.eventEmitter.emit('conflictResolved')
     }, 100)
   }
@@ -160,7 +154,6 @@ class SyncService {
    * Clear conflict state - useful for forced logout scenarios
    */
   clearConflictState(): void {
-    console.log('[DEBUG] SyncService.clearConflictState() called')
     this._status.value.conflictDetected = false
     this._conflictData.value = null
     this._status.value.lastSyncError = null
@@ -201,7 +194,6 @@ class SyncService {
         const { metadataService } = await import('@/services/metadata.service')
         const globalSyncTime = this._status.value.lastSyncTime || 0
         metadataService.setGlobalSyncTime(new Date(globalSyncTime))
-        console.log('[DEBUG] loadSyncStatus - initialized metadata service with global sync time:', globalSyncTime)
       } catch (error) {
         console.warn('Failed to initialize metadata service:', error)
       }
@@ -240,7 +232,6 @@ class SyncService {
   // 同期を有効化（既存ユーザー用）
   async enableSync(): Promise<SyncResult> {
     try {
-      console.log('[DEBUG] enableSync - starting sync enablement for existing user')
       
       // Google認証チェック
       if (!googleAuthService.isAuthenticated.value) {
@@ -256,9 +247,7 @@ class SyncService {
       try {
         const { metadataService } = await import('@/services/metadata.service')
         await metadataService.ensurePresetDataExists()
-        console.log('[DEBUG] enableSync - initial data marked as synced')
       } catch (error) {
-        console.warn('[DEBUG] enableSync - failed to mark initial data as synced:', error)
       }
 
       // 自動同期を開始
@@ -269,9 +258,6 @@ class SyncService {
       const localHoldings = await secureStorage.getHoldings()
       const skipConflictDetection = localHoldings.length === 0
       
-      console.log('[DEBUG] enableSync - performing initial sync')
-      console.log('[DEBUG] enableSync - local holdings count:', localHoldings.length)
-      console.log('[DEBUG] enableSync - skip conflict detection:', skipConflictDetection)
       
       // 競合検出をスキップして同期実行（ローカルデータ0件時）
       const syncResult = await this.performSync({ skipConflictDetection })
@@ -284,7 +270,6 @@ class SyncService {
         return syncResult
       }
 
-      console.log('[DEBUG] enableSync - sync enabled successfully')
       return { success: true, message: '同期が有効になりました' }
     } catch (error) {
       console.error('Failed to enable sync:', error)
@@ -302,7 +287,6 @@ class SyncService {
   // 同期を有効化（新規ユーザー用）
   async enableSyncForNewUser(): Promise<SyncResult> {
     try {
-      console.log('[DEBUG] enableSyncForNewUser - starting sync enablement for new user')
       
       // Google認証チェック
       if (!googleAuthService.isAuthenticated.value) {
@@ -318,17 +302,13 @@ class SyncService {
       try {
         const { metadataService } = await import('@/services/metadata.service')
         await metadataService.ensurePresetDataExists()
-        console.log('[DEBUG] enableSyncForNewUser - initial data marked as synced')
       } catch (error) {
-        console.warn('[DEBUG] enableSyncForNewUser - failed to mark initial data as synced:', error)
       }
 
       // 自動同期を開始
       this.startAutoSync()
 
       // 新規ユーザーの場合は常に競合検出をスキップ
-      console.log('[DEBUG] enableSyncForNewUser - performing initial sync')
-      console.log('[DEBUG] enableSyncForNewUser - skip conflict detection: true (new user)')
       
       // 競合検出をスキップして同期実行（新規ユーザー）
       const syncResult = await this.performSync({ skipConflictDetection: true })
@@ -341,7 +321,6 @@ class SyncService {
         return syncResult
       }
 
-      console.log('[DEBUG] enableSyncForNewUser - sync enabled successfully')
       return { success: true, message: '同期が有効になりました' }
     } catch (error) {
       console.error('Failed to enable sync for new user:', error)
@@ -357,7 +336,6 @@ class SyncService {
   }
 
   async disableSync(): Promise<void> {
-    console.log('[DEBUG] disableSync - disabling sync')
     this._status.value.isEnabled = false
     this._status.value.lastSyncError = null
     this.stopAutoSync()
@@ -366,7 +344,6 @@ class SyncService {
     // クラウドパスワードをローカルストレージから削除
     localStorage.removeItem('cloudPassword')
     
-    console.log('[DEBUG] disableSync - sync disabled successfully')
   }
 
   async performSync(options: { skipConflictDetection?: boolean } = {}): Promise<SyncResult> {
@@ -382,7 +359,6 @@ class SyncService {
     this._status.value.lastSyncError = null
     
     try {
-      console.log('[DEBUG] performSync - starting sync process')
       
       // 暗号化キーの復元を試行
       const { secureStorage } = await import('@/services/storage.service')
@@ -397,7 +373,7 @@ class SyncService {
       const localData = await this.getLocalData()
       const localTimestamp = await this.getLocalTimestamp()
       
-      console.log('[DEBUG] performSync - got local data:', {
+      console.log('Local sync data summary:', {
         holdingsCount: localData.holdings?.length || 0,
         locationsCount: localData.locations?.length || 0,
         tokensCount: localData.tokens?.length || 0,
@@ -409,7 +385,6 @@ class SyncService {
       
       if (!backupFile) {
         // クラウドファイルが存在しない場合は新規アップロード
-        console.log('[DEBUG] performSync - no cloud file found, uploading local data')
         await this.uploadToCloud(localData)
         
         const syncTime = Date.now()
@@ -425,10 +400,9 @@ class SyncService {
       }
 
       // クラウドデータをダウンロード
-      console.log('[DEBUG] performSync - downloading cloud data')
       const cloudData = await this.downloadFromCloud(backupFile.id)
       
-      console.log('[DEBUG] performSync - got cloud data:', {
+      console.log('Cloud sync data summary:', {
         holdingsCount: cloudData.portfolioData?.holdings?.length || 0,
         locationsCount: cloudData.portfolioData?.locations?.length || 0,
         tokensCount: cloudData.portfolioData?.tokens?.length || 0,
@@ -440,7 +414,6 @@ class SyncService {
         const hasConflict = await this.detectConflict(localData, cloudData, localTimestamp)
         
         if (hasConflict) {
-          console.log('[DEBUG] performSync - conflict detected, storing conflict data')
           this._conflictData.value = {
             localData,
             cloudData: cloudData.portfolioData,
@@ -458,7 +431,6 @@ class SyncService {
           }
         }
       } else {
-        console.log('[DEBUG] performSync - skipping conflict detection, prioritizing local data')
       }
 
       // 同期処理
@@ -470,32 +442,27 @@ class SyncService {
         const localHoldings = localData.holdings || []
         if (localHoldings.length === 0) {
           // ローカル保有データが0件の場合はクラウドデータを優先
-          console.log('[DEBUG] performSync - local holdings empty, downloading cloud data')
           finalData = cloudData.portfolioData
           await this.updateLocalData(finalData)
           syncMessage = 'クラウドデータをローカルに取得しました'
         } else {
           // ローカル保有データがある場合はローカルデータを優先
-          console.log('[DEBUG] performSync - local data priority mode, uploading to cloud')
           finalData = localData
           await this.uploadToCloud(finalData)
           syncMessage = 'ローカルデータをクラウドにアップロードしました'
         }
       } else if (cloudData.timestamp > localTimestamp) {
         // クラウドデータが新しい場合
-        console.log('[DEBUG] performSync - cloud data is newer, updating local data')
         finalData = cloudData.portfolioData
         await this.updateLocalData(finalData)
         syncMessage = 'クラウドデータでローカルデータを更新しました'
       } else if (localTimestamp > cloudData.timestamp) {
         // ローカルデータが新しい場合
-        console.log('[DEBUG] performSync - local data is newer, uploading to cloud')
         finalData = localData
         await this.uploadToCloud(finalData)
         syncMessage = 'ローカルデータをクラウドにアップロードしました'
       } else {
         // タイムスタンプが同じ場合
-        console.log('[DEBUG] performSync - timestamps are equal, no sync needed')
         finalData = localData
         syncMessage = 'データは既に同期されています'
       }
@@ -512,22 +479,18 @@ class SyncService {
       try {
         const { metadataService } = await import('@/services/metadata.service')
         await metadataService.markAllAsSynced()
-        console.log('[DEBUG] performSync - all data marked as synced')
         
         // メタデータ更新が完全に完了するまで少し待機
         await new Promise(resolve => setTimeout(resolve, 100))
         
         // キャッシュを再度クリアして確実に最新状態を反映
         metadataService.clearMetadataCache()
-        console.log('[DEBUG] performSync - cache cleared after marking all as synced')
       } catch (error) {
-        console.warn('[DEBUG] performSync - failed to mark data as synced:', error)
       }
       
       this.saveSyncStatus()
       this.emitSyncComplete()
       
-      console.log('[DEBUG] performSync - sync completed successfully')
       return { success: true, message: syncMessage }
 
     } catch (error) {
@@ -553,7 +516,6 @@ class SyncService {
       const { secureStorage } = await import('@/services/storage.service')
       
       if (secureStorage.isUnlocked()) {
-        console.log('[DEBUG] attemptAutoUnlock - storage already unlocked')
         return true
       }
 
@@ -568,7 +530,6 @@ class SyncService {
       }
       
       if (keyData) {
-        console.log(`[DEBUG] attemptAutoUnlock - found encryption key in ${keySource} storage, attempting to unlock`)
         
         try {
           const { CryptoService } = await import('@/services/crypto.service')
@@ -576,20 +537,16 @@ class SyncService {
           secureStorage.setEncryptionKey(cryptoKey)
           
           if (secureStorage.isUnlocked()) {
-            console.log(`[DEBUG] attemptAutoUnlock - successfully unlocked with ${keySource} key`)
             
             // セッションストレージにキーがない場合は保存
             if (keySource === 'local' && !sessionStorage.getItem('encryptionKey')) {
               sessionStorage.setItem('encryptionKey', keyData)
-              console.log('[DEBUG] attemptAutoUnlock - restored key to session storage')
             }
             
             return true
           } else {
-            console.log(`[DEBUG] attemptAutoUnlock - ${keySource} key failed to unlock storage`)
           }
         } catch (keyError) {
-          console.error(`[DEBUG] attemptAutoUnlock - failed to import key from ${keySource} storage:`, keyError)
           // Remove invalid key
           if (keySource === 'session') {
             sessionStorage.removeItem('encryptionKey')
@@ -598,12 +555,10 @@ class SyncService {
           }
         }
       } else {
-        console.log('[DEBUG] attemptAutoUnlock - no encryption key found in session or local storage')
       }
 
       return false
     } catch (error) {
-      console.error('[DEBUG] attemptAutoUnlock - error during auto unlock:', error)
       return false
     }
   }
@@ -617,10 +572,8 @@ class SyncService {
     
     try {
       const holdings = await secureStorage.getHoldings()
-      console.log('[DEBUG] getLocalData - got holdings:', holdings.length)
     } catch (error) {
       if (error instanceof Error && error.message === 'ENCRYPTION_KEY_MISMATCH') {
-        console.log('[DEBUG] getLocalData - clearing incompatible encrypted data')
         await secureStorage.clearIncompatibleEncryptedData()
         // After clearing, return empty data
         return {
@@ -694,7 +647,6 @@ class SyncService {
   }
 
   private async detectConflict(localData: any, cloudData: CloudBackupData, localTimestamp: number): Promise<boolean> {
-    console.log('[DEBUG] Conflict detection:')
     console.log('  Local timestamp:', new Date(localTimestamp).toISOString())
     console.log('  Cloud timestamp:', new Date(cloudData.timestamp).toISOString())
     
@@ -740,8 +692,6 @@ class SyncService {
       })
     
     const dataString = JSON.stringify(normalized, null, 0)
-    console.log('[DEBUG] createHoldingsHash - holdings count:', normalized.length)
-    console.log('[DEBUG] createHoldingsHash - data preview:', dataString.substring(0, 200) + '...')
     
     // Simple hash function
     let hash = 0
@@ -752,7 +702,6 @@ class SyncService {
     }
     
     const hashString = hash.toString(16)
-    console.log('[DEBUG] createHoldingsHash - result:', hashString)
     return hashString
   }
   
@@ -801,7 +750,7 @@ class SyncService {
     
     // Create hash from normalized data
     const dataString = JSON.stringify(normalized, null, 0)
-    console.log('[DEBUG] createDataHash - normalized data:', {
+    console.log('Normalized data for hashing:', {
       holdingsCount: normalized.holdings.length,
       customLocationsCount: normalized.locations.length,
       customTokensCount: normalized.tokens.length,
@@ -817,7 +766,6 @@ class SyncService {
     }
     
     const hashString = hash.toString(16)
-    console.log('[DEBUG] createDataHash - result:', hashString)
     return hashString
   }
 
@@ -834,7 +782,6 @@ class SyncService {
     const { secureStorage } = await import('@/services/storage.service')
     
     console.log('updateLocalData called with:', data)
-    console.log('[DEBUG] Detailed sync data contents:')
     console.log('  Holdings count:', data.holdings?.length || 0)
     console.log('  Holdings data:', data.holdings)
     console.log('  Tokens count:', data.tokens?.length || 0)
@@ -883,7 +830,6 @@ class SyncService {
     try {
       const { metadataService } = await import('@/services/metadata.service')
       metadataService.clearMetadataCache()
-      console.log('[DEBUG] updateLocalData - metadata cache cleared')
     } catch (error) {
       console.warn('Failed to clear metadata cache:', error)
     }
@@ -969,7 +915,6 @@ class SyncService {
     // 定期的な自動同期（5分間隔）
     this.syncTimer = window.setInterval(async () => {
       if (!this._status.value.isSyncing && !this._status.value.conflictDetected) {
-        console.log('[DEBUG] Auto sync triggered')
         await this.performSync()
       }
     }, 5 * 60 * 1000) // 5 minutes
@@ -977,11 +922,9 @@ class SyncService {
     // 競合チェック（30秒間隔）
     this.conflictCheckTimer = window.setInterval(async () => {
       if (this._status.value.conflictDetected) {
-        console.log('[DEBUG] Conflict check - conflict still detected')
       }
     }, 30 * 1000) // 30 seconds
     
-    console.log('[DEBUG] Auto sync timers started')
   }
 
   private stopAutoSync(): void {
@@ -995,7 +938,6 @@ class SyncService {
       this.conflictCheckTimer = null
     }
     
-    console.log('[DEBUG] Auto sync timers stopped')
   }
 
   async resetAutoSyncTimer(): Promise<void> {
@@ -1009,7 +951,6 @@ class SyncService {
       // 古いクラウドパスワード関連の設定をクリーンアップ
       const oldCloudPassword = localStorage.getItem('cloudPassword')
       if (oldCloudPassword) {
-        console.log('[DEBUG] performInitialCleanup - removing old cloud password')
         localStorage.removeItem('cloudPassword')
       }
     } catch (error) {
@@ -1031,7 +972,6 @@ class SyncService {
     if (this._status.value.isEnabled && 
         !this._status.value.isSyncing && 
         !this._status.value.conflictDetected) {
-      console.log('[DEBUG] triggerSyncOnDataChange - triggering sync due to data change')
       
       // 短時間の遅延後に同期を実行（連続する変更をバッチ処理するため）
       setTimeout(async () => {

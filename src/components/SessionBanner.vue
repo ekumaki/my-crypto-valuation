@@ -49,7 +49,7 @@
             </span>
           </div>
           
-          <div class="text-sm text-gray-600 dark:text-gray-400">
+          <div v-if="false" class="text-sm text-gray-600 dark:text-gray-400">
             残り時間: {{ remainingDisplay }}
           </div>
           
@@ -153,7 +153,6 @@ async function checkUnsyncedData() {
     const unsyncedData = await metadataService.getUnsyncedDataCount(isSyncEnabled)
     unsyncedCount.value = unsyncedData.total
     
-    console.log('[DEBUG] SessionBanner.checkUnsyncedData - updated count:', unsyncedCount.value)
   } catch (error) {
     console.error('Failed to check unsynced data:', error)
     unsyncedCount.value = 0
