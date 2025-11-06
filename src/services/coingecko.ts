@@ -31,7 +31,7 @@ class CoinGeckoService {
   private requestQueue: Array<() => Promise<any>> = []
   private isProcessing = false
   private lastRequestTime = 0
-  private readonly REQUEST_DELAY = 100 // 100ms between requests
+  private readonly REQUEST_DELAY = 500 // 500ms between requests to avoid rate limiting
 
   private async processQueue() {
     if (this.isProcessing || this.requestQueue.length === 0) return
@@ -73,8 +73,9 @@ class CoinGeckoService {
           })
           if (!response.ok) {
             if (response.status === 429) {
-              // 429エラーの場合は待機して再試行
-              await new Promise(resolve => setTimeout(resolve, 1000))
+              // 429エラーの場合は長めに待機して再試行
+              console.warn('Rate limit exceeded, waiting 3 seconds before retry...')
+              await new Promise(resolve => setTimeout(resolve, 3000))
               const retryResponse = await fetch(`${BASE_URL}${endpoint}`, {
                 method: 'GET',
                 headers: {
