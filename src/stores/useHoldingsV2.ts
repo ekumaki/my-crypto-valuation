@@ -469,40 +469,57 @@ export const useHoldingsStoreV2 = defineStore('holdingsV2', () => {
 
       if (tokenIds.length === 0) return
 
-      // Check for cached prices first
-      const pricePromises = symbols.map(async (symbol) => {
-        const tokenId = symbolToIdMap[symbol]
-        if (!tokenId) return null
-
-        const cachedPrice = await dbServiceV2.getPrice(symbol, yesterday)
-        if (cachedPrice && dbServiceV2.isPriceFresh(cachedPrice)) {
-          return { symbol, price: cachedPrice }
-        }
-
-        // Fetch fresh price
-        const price = await coinGeckoService.getPreviousDayPrice(tokenId)
-        if (price) {
-          await dbServiceV2.setPrice(symbol, yesterday, price)
-          return {
-            symbol,
-            price: { symbol, date: yesterday, priceJpy: price, fetchedAt: Date.now() }
-          }
-        }
-        return null
-      })
-
-      const priceResults = await Promise.all(pricePromises)
-      
-      // Update prices map
+      // Process prices sequentially to avoid rate limiting
       const newPrices: Record<string, Price> = {}
-      priceResults.forEach(result => {
-        if (result) {
-          newPrices[result.symbol] = result.price
-        }
-      })
+      let successCount = 0
+      let errorCount = 0
 
+      for (const symbol of symbols) {
+        const tokenId = symbolToIdMap[symbol]
+        if (!tokenId) {
+          console.warn(`No token ID found for symbol: ${symbol}`)
+          continue
+        }
+
+        try {
+          // Check for cached prices first
+          const cachedPrice = await dbServiceV2.getPrice(symbol, yesterday)
+          if (cachedPrice && dbServiceV2.isPriceFresh(cachedPrice)) {
+            newPrices[symbol] = cachedPrice
+            successCount++
+            console.log(`Using cached price for ${symbol}: ¥${cachedPrice.priceJpy.toLocaleString()}`)
+            continue
+          }
+
+          // Fetch fresh price
+          console.log(`Fetching price for ${symbol}...`)
+          const price = await coinGeckoService.getPreviousDayPrice(tokenId)
+          if (price) {
+            await dbServiceV2.setPrice(symbol, yesterday, price)
+            newPrices[symbol] = { symbol, date: yesterday, priceJpy: price, fetchedAt: Date.now() }
+            successCount++
+            console.log(`Successfully fetched price for ${symbol}: ¥${price.toLocaleString()}`)
+          } else {
+            errorCount++
+            console.warn(`Failed to fetch price for ${symbol}`)
+          }
+        } catch (err) {
+          errorCount++
+          console.error(`Error fetching price for ${symbol}:`, err)
+        }
+      }
+
+      // Update prices map
       prices.value = { ...prices.value, ...newPrices }
       lastPriceUpdate.value = new Date()
+
+      console.log(`Price update completed: ${successCount} successful, ${errorCount} failed`)
+
+      if (errorCount > 0 && successCount === 0) {
+        error.value = '価格の更新に失敗しました'
+      } else if (errorCount > 0) {
+        console.warn(`一部の価格取得に失敗しました（${errorCount}/${symbols.length}）`)
+      }
     } catch (err) {
       error.value = '価格の更新に失敗しました'
       console.error('Failed to update prices:', err)
