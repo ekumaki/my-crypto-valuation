@@ -151,15 +151,37 @@ class CoinGeckoService {
     try {
       // Format: DD-MM-YYYY
       const formattedDate = this.formatDateForAPI(date)
-      const data = await this.fetchAPI<any>(`/coins/${coinId}/history?date=${formattedDate}`)
-      
+
+      // Firebase Functionsのプロキシを使用してCORS問題を回避
+      const functionsUrl = import.meta.env.VITE_FUNCTIONS_URL ||
+                          'https://us-central1-crypto-portfolio-app-463409.cloudfunctions.net'
+      const proxyUrl = `${functionsUrl}/getCoinPrice?coinId=${coinId}&date=${formattedDate}`
+
+      console.log(`Fetching price via proxy for ${coinId}...`)
+
+      const response = await fetch(proxyUrl, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+        },
+      })
+
+      if (!response.ok) {
+        if (response.status === 429) {
+          console.warn('Rate limit exceeded on proxy')
+        }
+        throw new Error(`Proxy API error: ${response.status}`)
+      }
+
+      const data = await response.json()
+
       if (data.market_data?.current_price?.jpy) {
         return data.market_data.current_price.jpy
       } else if (data.market_data?.current_price?.usd) {
         const jpyRate = await this.getUSDToJPYRate()
         return data.market_data.current_price.usd * jpyRate
       }
-      
+
       return null
     } catch (error) {
       console.error('Historical price fetch failed:', error)
